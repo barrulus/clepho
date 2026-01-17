@@ -7,7 +7,7 @@ authors = ["Clepho Authors"]
 
 [dependencies]
 # TUI
-ratatui = "0.28"
+ratatui = "0.29"
 crossterm = "0.28"
 
 # Async runtime
@@ -20,6 +20,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 image = "0.25"
 kamadak-exif = "0.5"
 img_hash = "3.2"
+
+# Face detection and recognition (ONNX Runtime)
+ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
+ndarray = "0.16"
 
 # Hashing
 md-5 = "0.10"
@@ -45,3 +49,9 @@ dirs = "5"
 
 # Base64 for image encoding
 base64 = "0.22"
+
+# Terminal image rendering
+ratatui-image = "3"
+
+# Export functionality
+csv = "1"

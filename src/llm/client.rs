@@ -1,14 +1,22 @@
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Arc;
 
-#[derive(Clone)]
+use crate::config::LlmConfig;
+use super::provider::{create_provider, DetectedFace, FaceDetectionResponse, LlmProvider};
+
+pub use super::provider::{DetectedFace as FaceInfo, FaceDetectionResponse as FaceDetectionResult};
+
+/// LLM client that wraps a provider implementation
 pub struct LlmClient {
+    provider: Arc<dyn LlmProvider>,
+    // Keep the legacy fields for backwards compatibility
     endpoint: String,
     model: String,
 }
 
+// Request/response structs for OpenAI-compatible API (used by legacy methods)
 #[derive(Debug, Serialize)]
 struct ChatRequest {
     model: String,
@@ -25,6 +33,7 @@ struct Message {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
+#[allow(dead_code)]
 enum ContentPart {
     #[serde(rename = "text")]
     Text { text: String },
@@ -53,71 +62,48 @@ struct ResponseMessage {
 }
 
 impl LlmClient {
+    /// Create a new LlmClient with legacy endpoint/model parameters
+    /// (for backwards compatibility)
     pub fn new(endpoint: &str, model: &str) -> Self {
+        // Create a default config for backwards compatibility
+        let config = LlmConfig {
+            endpoint: endpoint.to_string(),
+            model: model.to_string(),
+            ..Default::default()
+        };
+        let provider = create_provider(&config);
+
         Self {
+            provider: Arc::from(provider),
             endpoint: endpoint.to_string(),
             model: model.to_string(),
         }
     }
 
-    pub fn describe_image(&self, image_path: &Path) -> Result<String> {
-        // Read and encode image as base64
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
+    /// Create a new LlmClient from configuration
+    #[allow(dead_code)]
+    pub fn from_config(config: &LlmConfig) -> Self {
+        let provider = create_provider(config);
 
-        // Determine MIME type from extension
-        let mime_type = match image_path.extension().and_then(|e| e.to_str()) {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg", // Default to JPEG
-        };
-
-        let data_url = format!("data:{};base64,{}", mime_type, base64_image);
-
-        let request = ChatRequest {
-            model: self.model.clone(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: vec![
-                    ContentPart::Text {
-                        text: "Describe this image in detail. Include information about: \
-                               1) The main subject or scene \
-                               2) Notable objects, people, or elements \
-                               3) Colors, lighting, and mood \
-                               4) Any text visible in the image \
-                               5) Suggested tags for organizing this photo. \
-                               Keep the description concise but informative."
-                            .to_string(),
-                    },
-                    ContentPart::ImageUrl {
-                        image_url: ImageUrl { url: data_url },
-                    },
-                ],
-            }],
-            max_tokens: 500,
-            temperature: 0.7,
-        };
-
-        let url = format!("{}/chat/completions", self.endpoint);
-
-        let response = ureq::post(&url)
-            .set("Content-Type", "application/json")
-            .send_json(&request)
-            .map_err(|e| anyhow!("LLM request failed: {}", e))?;
-
-        let chat_response: ChatResponse = response
-            .into_json()
-            .map_err(|e| anyhow!("Failed to parse LLM response: {}", e))?;
-
-        chat_response
-            .choices
-            .first()
-            .map(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow!("No response from LLM"))
+        Self {
+            provider: Arc::from(provider),
+            endpoint: config.endpoint.clone(),
+            model: config.model.clone(),
+        }
     }
 
+    /// Get the provider name
+    #[allow(dead_code)]
+    pub fn provider_name(&self) -> &'static str {
+        self.provider.provider_name()
+    }
+
+    /// Describe an image using the configured provider
+    pub fn describe_image(&self, image_path: &Path) -> Result<String> {
+        self.provider.describe_image(image_path)
+    }
+
+    /// Generate tags from a description (uses legacy OpenAI-compatible API)
     pub fn generate_tags(&self, description: &str) -> Result<Vec<String>> {
         let request = ChatRequest {
             model: self.model.clone(),
@@ -162,6 +148,16 @@ impl LlmClient {
         Ok(tags)
     }
 
+    /// Detect faces in an image using the configured provider
+    pub fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
+        self.provider.detect_faces(image_path)
+    }
+
+    /// Check if the provider supports face detection
+    pub fn supports_face_detection(&self) -> bool {
+        self.provider.supports_face_detection()
+    }
+
     #[allow(dead_code)]
     pub fn test_connection(&self) -> Result<bool> {
         let url = format!("{}/models", self.endpoint);
@@ -169,6 +165,17 @@ impl LlmClient {
         match ureq::get(&url).call() {
             Ok(response) => Ok(response.status() == 200),
             Err(_) => Ok(false),
+        }
+    }
+}
+
+// Make LlmClient Clone by wrapping provider in Arc
+impl Clone for LlmClient {
+    fn clone(&self) -> Self {
+        Self {
+            provider: Arc::clone(&self.provider),
+            endpoint: self.endpoint.clone(),
+            model: self.model.clone(),
         }
     }
 }

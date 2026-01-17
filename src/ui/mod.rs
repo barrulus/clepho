@@ -1,7 +1,12 @@
 mod browser;
 mod dialogs;
 pub mod duplicates;
-mod preview;
+pub mod export_dialog;
+pub mod move_dialog;
+pub mod people_dialog;
+pub mod preview;
+pub mod rename_dialog;
+pub mod search_dialog;
 mod status_bar;
 
 use ratatui::prelude::*;
@@ -49,5 +54,40 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Render help overlay if in help mode
     if app.mode == AppMode::Help {
         dialogs::render_help(frame, area);
+    }
+
+    // Render move dialog if in move mode
+    if app.mode == AppMode::Moving {
+        if let Some(ref dialog) = app.move_dialog {
+            move_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render rename dialog if in rename mode
+    if app.mode == AppMode::Renaming {
+        if let Some(ref dialog) = app.rename_dialog {
+            rename_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render export dialog if in export mode
+    if app.mode == AppMode::Exporting {
+        if let Some(ref dialog) = app.export_dialog {
+            export_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render search dialog if in search mode
+    if app.mode == AppMode::Searching {
+        if let Some(ref dialog) = app.search_dialog {
+            search_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render people dialog if in people management mode
+    if app.mode == AppMode::PeopleManaging {
+        if app.people_dialog.is_some() {
+            people_dialog::render(frame, app, area);
+        }
     }
 }

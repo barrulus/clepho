@@ -1,0 +1,783 @@
+use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+/// Detected face information from LLM
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedFace {
+    /// Bounding box as percentage of image dimensions (0-100)
+    pub x_percent: f32,
+    pub y_percent: f32,
+    pub width_percent: f32,
+    pub height_percent: f32,
+    /// Optional description of the face (age, expression, etc.)
+    pub description: Option<String>,
+    /// Confidence score (0-1)
+    pub confidence: f32,
+}
+
+/// Response from face detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceDetectionResponse {
+    pub faces: Vec<DetectedFace>,
+    pub image_width: Option<u32>,
+    pub image_height: Option<u32>,
+}
+
+/// Trait for LLM providers that can describe images
+pub trait LlmProvider: Send + Sync {
+    /// Describe an image at the given path
+    fn describe_image(&self, image_path: &Path) -> Result<String>;
+
+    /// Get the provider name for display
+    fn provider_name(&self) -> &'static str;
+
+    /// Get text embedding for semantic search (optional)
+    fn get_text_embedding(&self, _text: &str) -> Result<Vec<f32>> {
+        Err(anyhow!("Embeddings not supported by this provider"))
+    }
+
+    /// Check if this provider supports embeddings
+    fn supports_embeddings(&self) -> bool {
+        false
+    }
+
+    /// Detect faces in an image (optional)
+    fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
+        // Default implementation that extracts faces from image description
+        let _ = image_path;
+        Err(anyhow!("Face detection not supported by this provider"))
+    }
+
+    /// Check if this provider supports face detection
+    fn supports_face_detection(&self) -> bool {
+        false
+    }
+}
+
+// ============================================================================
+// OpenAI-compatible provider (works with LM Studio, OpenAI, and compatible APIs)
+// ============================================================================
+
+pub struct OpenAICompatibleProvider {
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+    embedding_model: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIChatRequest {
+    model: String,
+    messages: Vec<OpenAIMessage>,
+    max_tokens: u32,
+    temperature: f32,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIMessage {
+    role: String,
+    content: Vec<OpenAIContentPart>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum OpenAIContentPart {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: ImageUrl },
+}
+
+#[derive(Debug, Serialize)]
+struct ImageUrl {
+    url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIChatResponse {
+    choices: Vec<OpenAIChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIChoice {
+    message: OpenAIResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIResponseMessage {
+    content: String,
+}
+
+// Embedding request/response structs
+#[derive(Debug, Serialize)]
+struct EmbeddingRequest {
+    model: String,
+    input: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmbeddingResponse {
+    data: Vec<EmbeddingData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmbeddingData {
+    embedding: Vec<f32>,
+}
+
+impl OpenAICompatibleProvider {
+    pub fn new(endpoint: &str, model: &str, api_key: Option<&str>) -> Self {
+        Self {
+            endpoint: endpoint.to_string(),
+            model: model.to_string(),
+            api_key: api_key.map(|s| s.to_string()),
+            embedding_model: "text-embedding-ada-002".to_string(),
+        }
+    }
+
+    pub fn with_embedding_model(mut self, model: &str) -> Self {
+        self.embedding_model = model.to_string();
+        self
+    }
+
+    fn get_image_prompt() -> &'static str {
+        "Describe this image in detail. Include information about: \
+         1) The main subject or scene \
+         2) Notable objects, people, or elements \
+         3) Colors, lighting, and mood \
+         4) Any text visible in the image \
+         5) Suggested tags for organizing this photo. \
+         Keep the description concise but informative."
+    }
+}
+
+impl LlmProvider for OpenAICompatibleProvider {
+    fn describe_image(&self, image_path: &Path) -> Result<String> {
+        let image_data = std::fs::read(image_path)?;
+        let base64_image = BASE64.encode(&image_data);
+
+        let mime_type = match image_path.extension().and_then(|e| e.to_str()) {
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("png") => "image/png",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => "image/jpeg",
+        };
+
+        let data_url = format!("data:{};base64,{}", mime_type, base64_image);
+
+        let request = OpenAIChatRequest {
+            model: self.model.clone(),
+            messages: vec![OpenAIMessage {
+                role: "user".to_string(),
+                content: vec![
+                    OpenAIContentPart::Text {
+                        text: Self::get_image_prompt().to_string(),
+                    },
+                    OpenAIContentPart::ImageUrl {
+                        image_url: ImageUrl { url: data_url },
+                    },
+                ],
+            }],
+            max_tokens: 500,
+            temperature: 0.7,
+        };
+
+        let url = format!("{}/chat/completions", self.endpoint);
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(120))
+            .build();
+
+        let mut req = agent.post(&url).set("Content-Type", "application/json");
+
+        if let Some(ref api_key) = self.api_key {
+            req = req.set("Authorization", &format!("Bearer {}", api_key));
+        }
+
+        let response = req
+            .send_json(&request)
+            .map_err(|e| anyhow!("LLM request failed: {}", e))?;
+
+        let chat_response: OpenAIChatResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse LLM response: {}", e))?;
+
+        chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| anyhow!("No response from LLM"))
+    }
+
+    fn provider_name(&self) -> &'static str {
+        "OpenAI-compatible"
+    }
+
+    fn get_text_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        let request = EmbeddingRequest {
+            model: self.embedding_model.clone(),
+            input: text.to_string(),
+        };
+
+        let url = format!("{}/embeddings", self.endpoint);
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(60))
+            .build();
+
+        let mut req = agent.post(&url).set("Content-Type", "application/json");
+
+        if let Some(ref api_key) = self.api_key {
+            req = req.set("Authorization", &format!("Bearer {}", api_key));
+        }
+
+        let response = req
+            .send_json(&request)
+            .map_err(|e| anyhow!("Embedding request failed: {}", e))?;
+
+        let embedding_response: EmbeddingResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse embedding response: {}", e))?;
+
+        embedding_response
+            .data
+            .first()
+            .map(|d| d.embedding.clone())
+            .ok_or_else(|| anyhow!("No embedding in response"))
+    }
+
+    fn supports_embeddings(&self) -> bool {
+        self.api_key.is_some() // Embeddings typically require API key
+    }
+
+    fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
+        let image_data = std::fs::read(image_path)?;
+        let base64_image = BASE64.encode(&image_data);
+
+        let mime_type = match image_path.extension().and_then(|e| e.to_str()) {
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("png") => "image/png",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => "image/jpeg",
+        };
+
+        let data_url = format!("data:{};base64,{}", mime_type, base64_image);
+
+        let face_detection_prompt = r#"Analyze this image and detect all human faces present.
+
+For each face found, provide:
+1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
+2. A brief description (age estimate, expression, any notable features)
+3. Your confidence level (0-1)
+
+Return the results as JSON in this exact format:
+{
+  "faces": [
+    {
+      "x_percent": <number 0-100>,
+      "y_percent": <number 0-100>,
+      "width_percent": <number 0-100>,
+      "height_percent": <number 0-100>,
+      "description": "<brief description>",
+      "confidence": <number 0-1>
+    }
+  ]
+}
+
+If no faces are found, return: {"faces": []}
+
+Return ONLY the JSON, no other text."#;
+
+        let request = OpenAIChatRequest {
+            model: self.model.clone(),
+            messages: vec![OpenAIMessage {
+                role: "user".to_string(),
+                content: vec![
+                    OpenAIContentPart::Text {
+                        text: face_detection_prompt.to_string(),
+                    },
+                    OpenAIContentPart::ImageUrl {
+                        image_url: ImageUrl { url: data_url },
+                    },
+                ],
+            }],
+            max_tokens: 1000,
+            temperature: 0.3,
+        };
+
+        let url = format!("{}/chat/completions", self.endpoint);
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(120))
+            .build();
+
+        let mut req = agent.post(&url).set("Content-Type", "application/json");
+
+        if let Some(ref api_key) = self.api_key {
+            req = req.set("Authorization", &format!("Bearer {}", api_key));
+        }
+
+        let response = req
+            .send_json(&request)
+            .map_err(|e| anyhow!("Face detection request failed: {}", e))?;
+
+        let chat_response: OpenAIChatResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse face detection response: {}", e))?;
+
+        let content = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| anyhow!("No response from LLM"))?;
+
+        // Parse the JSON response
+        // Try to extract JSON from the response (handle markdown code blocks)
+        let json_str = extract_json(&content);
+
+        let detection: FaceDetectionResponse = serde_json::from_str(&json_str)
+            .map_err(|e| anyhow!("Failed to parse face detection JSON: {} - Response was: {}", e, content))?;
+
+        Ok(detection)
+    }
+
+    fn supports_face_detection(&self) -> bool {
+        true
+    }
+}
+
+/// Extract JSON from a string that might contain markdown code blocks
+fn extract_json(content: &str) -> String {
+    let trimmed = content.trim();
+
+    // Check for markdown code block
+    if trimmed.starts_with("```") {
+        // Find the end of the code block
+        if let Some(start) = trimmed.find('\n') {
+            let after_first_line = &trimmed[start + 1..];
+            if let Some(end) = after_first_line.rfind("```") {
+                return after_first_line[..end].trim().to_string();
+            }
+        }
+    }
+
+    // Already plain JSON
+    trimmed.to_string()
+}
+
+// ============================================================================
+// Anthropic Claude provider
+// ============================================================================
+
+pub struct AnthropicProvider {
+    api_key: String,
+    model: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicRequest {
+    model: String,
+    max_tokens: u32,
+    messages: Vec<AnthropicMessage>,
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicMessage {
+    role: String,
+    content: Vec<AnthropicContent>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum AnthropicContent {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image { source: AnthropicImageSource },
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicImageSource {
+    #[serde(rename = "type")]
+    source_type: String,
+    media_type: String,
+    data: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicResponseContent>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicResponseContent {
+    text: Option<String>,
+}
+
+impl AnthropicProvider {
+    pub fn new(api_key: &str, model: Option<&str>) -> Self {
+        Self {
+            api_key: api_key.to_string(),
+            model: model.unwrap_or("claude-sonnet-4-20250514").to_string(),
+        }
+    }
+}
+
+impl LlmProvider for AnthropicProvider {
+    fn describe_image(&self, image_path: &Path) -> Result<String> {
+        let image_data = std::fs::read(image_path)?;
+        let base64_image = BASE64.encode(&image_data);
+
+        let media_type = match image_path.extension().and_then(|e| e.to_str()) {
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("png") => "image/png",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => "image/jpeg",
+        };
+
+        let request = AnthropicRequest {
+            model: self.model.clone(),
+            max_tokens: 500,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: vec![
+                    AnthropicContent::Image {
+                        source: AnthropicImageSource {
+                            source_type: "base64".to_string(),
+                            media_type: media_type.to_string(),
+                            data: base64_image,
+                        },
+                    },
+                    AnthropicContent::Text {
+                        text: OpenAICompatibleProvider::get_image_prompt().to_string(),
+                    },
+                ],
+            }],
+        };
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(120))
+            .build();
+
+        let response = agent.post("https://api.anthropic.com/v1/messages")
+            .set("Content-Type", "application/json")
+            .set("x-api-key", &self.api_key)
+            .set("anthropic-version", "2023-06-01")
+            .send_json(&request)
+            .map_err(|e| anyhow!("Anthropic request failed: {}", e))?;
+
+        let anthropic_response: AnthropicResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse Anthropic response: {}", e))?;
+
+        anthropic_response
+            .content
+            .first()
+            .and_then(|c| c.text.clone())
+            .ok_or_else(|| anyhow!("No response from Anthropic"))
+    }
+
+    fn provider_name(&self) -> &'static str {
+        "Anthropic Claude"
+    }
+
+    fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
+        let image_data = std::fs::read(image_path)?;
+        let base64_image = BASE64.encode(&image_data);
+
+        let media_type = match image_path.extension().and_then(|e| e.to_str()) {
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("png") => "image/png",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => "image/jpeg",
+        };
+
+        let face_detection_prompt = r#"Analyze this image and detect all human faces present.
+
+For each face found, provide:
+1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
+2. A brief description (age estimate, expression, any notable features)
+3. Your confidence level (0-1)
+
+Return the results as JSON in this exact format:
+{
+  "faces": [
+    {
+      "x_percent": <number 0-100>,
+      "y_percent": <number 0-100>,
+      "width_percent": <number 0-100>,
+      "height_percent": <number 0-100>,
+      "description": "<brief description>",
+      "confidence": <number 0-1>
+    }
+  ]
+}
+
+If no faces are found, return: {"faces": []}
+
+Return ONLY the JSON, no other text."#;
+
+        let request = AnthropicRequest {
+            model: self.model.clone(),
+            max_tokens: 1000,
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: vec![
+                    AnthropicContent::Image {
+                        source: AnthropicImageSource {
+                            source_type: "base64".to_string(),
+                            media_type: media_type.to_string(),
+                            data: base64_image,
+                        },
+                    },
+                    AnthropicContent::Text {
+                        text: face_detection_prompt.to_string(),
+                    },
+                ],
+            }],
+        };
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(120))
+            .build();
+
+        let response = agent.post("https://api.anthropic.com/v1/messages")
+            .set("Content-Type", "application/json")
+            .set("x-api-key", &self.api_key)
+            .set("anthropic-version", "2023-06-01")
+            .send_json(&request)
+            .map_err(|e| anyhow!("Anthropic face detection request failed: {}", e))?;
+
+        let anthropic_response: AnthropicResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse Anthropic face detection response: {}", e))?;
+
+        let content = anthropic_response
+            .content
+            .first()
+            .and_then(|c| c.text.clone())
+            .ok_or_else(|| anyhow!("No response from Anthropic"))?;
+
+        let json_str = extract_json(&content);
+
+        let detection: FaceDetectionResponse = serde_json::from_str(&json_str)
+            .map_err(|e| anyhow!("Failed to parse face detection JSON: {} - Response was: {}", e, content))?;
+
+        Ok(detection)
+    }
+
+    fn supports_face_detection(&self) -> bool {
+        true
+    }
+}
+
+// ============================================================================
+// Ollama provider
+// ============================================================================
+
+pub struct OllamaProvider {
+    endpoint: String,
+    model: String,
+    embedding_model: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaRequest {
+    model: String,
+    prompt: String,
+    images: Vec<String>,
+    stream: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaResponse {
+    response: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaEmbeddingRequest {
+    model: String,
+    prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaEmbeddingResponse {
+    embedding: Vec<f32>,
+}
+
+impl OllamaProvider {
+    pub fn new(endpoint: Option<&str>, model: &str) -> Self {
+        Self {
+            endpoint: endpoint.unwrap_or("http://localhost:11434").to_string(),
+            model: model.to_string(),
+            embedding_model: "nomic-embed-text".to_string(), // Default embedding model
+        }
+    }
+
+    pub fn with_embedding_model(mut self, model: &str) -> Self {
+        self.embedding_model = model.to_string();
+        self
+    }
+}
+
+impl LlmProvider for OllamaProvider {
+    fn describe_image(&self, image_path: &Path) -> Result<String> {
+        let image_data = std::fs::read(image_path)?;
+        let base64_image = BASE64.encode(&image_data);
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            prompt: OpenAICompatibleProvider::get_image_prompt().to_string(),
+            images: vec![base64_image],
+            stream: false,
+        };
+
+        let url = format!("{}/api/generate", self.endpoint);
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(180))
+            .build();
+
+        let response = agent.post(&url)
+            .set("Content-Type", "application/json")
+            .send_json(&request)
+            .map_err(|e| anyhow!("Ollama request failed: {}", e))?;
+
+        let ollama_response: OllamaResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse Ollama response: {}", e))?;
+
+        Ok(ollama_response.response)
+    }
+
+    fn provider_name(&self) -> &'static str {
+        "Ollama"
+    }
+
+    fn get_text_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        let request = OllamaEmbeddingRequest {
+            model: self.embedding_model.clone(),
+            prompt: text.to_string(),
+        };
+
+        let url = format!("{}/api/embeddings", self.endpoint);
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(60))
+            .build();
+
+        let response = agent.post(&url)
+            .set("Content-Type", "application/json")
+            .send_json(&request)
+            .map_err(|e| anyhow!("Ollama embedding request failed: {}", e))?;
+
+        let embedding_response: OllamaEmbeddingResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse Ollama embedding response: {}", e))?;
+
+        Ok(embedding_response.embedding)
+    }
+
+    fn supports_embeddings(&self) -> bool {
+        true
+    }
+
+    fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
+        let image_data = std::fs::read(image_path)?;
+        let base64_image = BASE64.encode(&image_data);
+
+        let face_detection_prompt = r#"Analyze this image and detect all human faces present.
+
+For each face found, provide:
+1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
+2. A brief description (age estimate, expression, any notable features)
+3. Your confidence level (0-1)
+
+Return the results as JSON in this exact format:
+{
+  "faces": [
+    {
+      "x_percent": <number 0-100>,
+      "y_percent": <number 0-100>,
+      "width_percent": <number 0-100>,
+      "height_percent": <number 0-100>,
+      "description": "<brief description>",
+      "confidence": <number 0-1>
+    }
+  ]
+}
+
+If no faces are found, return: {"faces": []}
+
+Return ONLY the JSON, no other text."#;
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            prompt: face_detection_prompt.to_string(),
+            images: vec![base64_image],
+            stream: false,
+        };
+
+        let url = format!("{}/api/generate", self.endpoint);
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(180))
+            .build();
+
+        let response = agent.post(&url)
+            .set("Content-Type", "application/json")
+            .send_json(&request)
+            .map_err(|e| anyhow!("Ollama face detection request failed: {}", e))?;
+
+        let ollama_response: OllamaResponse = response
+            .into_json()
+            .map_err(|e| anyhow!("Failed to parse Ollama face detection response: {}", e))?;
+
+        let json_str = extract_json(&ollama_response.response);
+
+        let detection: FaceDetectionResponse = serde_json::from_str(&json_str)
+            .map_err(|e| anyhow!("Failed to parse face detection JSON: {} - Response was: {}", e, ollama_response.response))?;
+
+        Ok(detection)
+    }
+
+    fn supports_face_detection(&self) -> bool {
+        true
+    }
+}
+
+// ============================================================================
+// Factory function
+// ============================================================================
+
+use crate::config::{LlmConfig, LlmProviderType};
+
+/// Create an LLM provider based on configuration
+pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
+    match config.provider {
+        LlmProviderType::LmStudio => Box::new(OpenAICompatibleProvider::new(
+            &config.endpoint,
+            &config.model,
+            config.api_key.as_deref(),
+        )),
+        LlmProviderType::OpenAI => Box::new(OpenAICompatibleProvider::new(
+            "https://api.openai.com/v1",
+            &config.model,
+            config.api_key.as_deref(),
+        )),
+        LlmProviderType::Anthropic => {
+            let api_key = config.api_key.as_deref().unwrap_or("");
+            Box::new(AnthropicProvider::new(api_key, Some(&config.model)))
+        }
+        LlmProviderType::Ollama => Box::new(OllamaProvider::new(
+            Some(&config.endpoint),
+            &config.model,
+        )),
+    }
+}

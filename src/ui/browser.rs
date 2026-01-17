@@ -3,7 +3,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
 };
 
-use crate::app::{App, DirEntry};
+use crate::app::{App, AppMode, DirEntry};
 
 pub fn render_parent(frame: &mut Frame, app: &App, area: Rect) {
     let title = app
@@ -16,7 +16,7 @@ pub fn render_parent(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .parent_entries
         .iter()
-        .map(|entry| entry_to_list_item(entry, false))
+        .map(|entry| entry_to_list_item(entry, false, false))
         .collect();
 
     let list = List::new(items)
@@ -41,17 +41,34 @@ pub fn render_current(frame: &mut Frame, app: &App, area: Rect) {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| app.current_dir.to_string_lossy().to_string());
 
+    // Add selection count to title if any files are selected
+    let title = if app.selection_count() > 0 {
+        format!("{} [{} selected]", title, app.selection_count())
+    } else {
+        title
+    };
+
     let items: Vec<ListItem> = app
         .entries
         .iter()
-        .map(|entry| entry_to_list_item(entry, true))
+        .map(|entry| {
+            let is_selected = app.is_selected(&entry.path);
+            entry_to_list_item(entry, true, is_selected)
+        })
         .collect();
+
+    // Visual mode has a different border color
+    let border_color = if app.mode == AppMode::Visual {
+        Color::Magenta
+    } else {
+        Color::Blue
+    };
 
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue))
+                .border_style(Style::default().fg(border_color))
                 .title(title),
         )
         .highlight_style(
@@ -67,23 +84,30 @@ pub fn render_current(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn entry_to_list_item(entry: &DirEntry, show_size: bool) -> ListItem<'static> {
-    let icon = if entry.is_dir { "📁 " } else { "  " };
+fn entry_to_list_item(entry: &DirEntry, show_size: bool, is_selected: bool) -> ListItem<'static> {
+    // Selection indicator
+    let select_marker = if is_selected { "* " } else { "  " };
+    let icon = if entry.is_dir { "/" } else { " " };
     let name = entry.name.clone();
 
     let text = if show_size && !entry.is_dir {
-        format!("{}{} {}", icon, name, format_size(entry.size))
+        format!("{}{}{} {}", select_marker, icon, name, format_size(entry.size))
     } else {
-        format!("{}{}", icon, name)
+        format!("{}{}{}", select_marker, icon, name)
     };
 
-    let style = if entry.is_dir {
+    let mut style = if entry.is_dir {
         Style::default().fg(Color::Cyan)
     } else if is_image(&entry.name) {
         Style::default().fg(Color::Green)
     } else {
         Style::default()
     };
+
+    // Selected files get a different background
+    if is_selected {
+        style = style.bg(Color::DarkGray);
+    }
 
     ListItem::new(text).style(style)
 }

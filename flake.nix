@@ -32,7 +32,7 @@
           ];
 
           shellHook = ''
-            echo "🦀 Clepho development environment"
+            echo "Clepho development environment"
             echo "Run 'cargo build' to compile"
             echo "Run 'cargo run' to start the application"
           '';

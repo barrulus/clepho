@@ -1,4 +1,6 @@
 mod schema;
+pub mod embeddings;
+pub mod faces;
 pub mod similarity;
 
 use anyhow::Result;
@@ -7,6 +9,8 @@ use std::path::PathBuf;
 
 pub use schema::SCHEMA;
 pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
+pub use embeddings::{EmbeddingRecord, SearchResult, cosine_similarity};
+pub use faces::{BoundingBox, Face, FaceCluster, FaceWithPhoto, Person};
 
 pub struct Database {
     pub conn: Connection,
@@ -60,5 +64,78 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Update photo path after moving a file
+    pub fn update_photo_path(&self, old_path: &std::path::Path, new_path: &std::path::Path) -> Result<()> {
+        let old_path_str = old_path.to_string_lossy();
+        let new_path_str = new_path.to_string_lossy();
+
+        self.conn.execute(
+            "UPDATE photos SET path = ? WHERE path = ?",
+            rusqlite::params![new_path_str, old_path_str],
+        )?;
+
+        Ok(())
+    }
+
+    /// Simple text-based search on descriptions (fallback when no embeddings)
+    pub fn semantic_search_by_text(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        let query_lower = query.to_lowercase();
+        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, path, filename, description
+            FROM photos
+            WHERE description IS NOT NULL
+            "#,
+        )?;
+
+        let mut results: Vec<SearchResult> = stmt
+            .query_map([], |row| {
+                let description: String = row.get(3)?;
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    description,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, path, filename, description)| {
+                let desc_lower = description.to_lowercase();
+
+                // Calculate simple relevance score based on word matches
+                let mut score = 0.0f32;
+                for word in &query_words {
+                    if desc_lower.contains(word) {
+                        score += 1.0;
+                    }
+                }
+
+                if score > 0.0 {
+                    // Normalize score
+                    let similarity = score / query_words.len() as f32;
+                    Some(SearchResult {
+                        photo_id: id,
+                        path,
+                        filename,
+                        similarity,
+                        description: Some(description),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by similarity descending
+        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Take top results
+        results.truncate(limit);
+
+        Ok(results)
     }
 }

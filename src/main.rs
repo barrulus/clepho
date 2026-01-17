@@ -1,6 +1,8 @@
 mod app;
 mod config;
 mod db;
+mod export;
+mod faces;
 mod llm;
 mod scanner;
 mod ui;

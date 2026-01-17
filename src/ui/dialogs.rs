@@ -6,7 +6,7 @@ use ratatui::{
 pub fn render_help(frame: &mut Frame, area: Rect) {
     // Center the help dialog
     let dialog_width = 60.min(area.width.saturating_sub(4));
-    let dialog_height = 20.min(area.height.saturating_sub(4));
+    let dialog_height = 28.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -29,12 +29,22 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  Ctrl+u     Page up"),
         Line::from("  ~          Go to home directory"),
         Line::from(""),
+        Line::from(Span::styled("Selection", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(""),
+        Line::from("  Space      Toggle file selection"),
+        Line::from("  V          Enter visual mode (range select)"),
+        Line::from("  Esc        Clear selection / exit visual mode"),
+        Line::from(""),
         Line::from(Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
         Line::from(""),
         Line::from("  s          Scan current directory for photos"),
         Line::from("  d          Find duplicate photos"),
         Line::from("  D          Describe image with AI (LLM)"),
         Line::from("  P          Batch process all photos with AI"),
+        Line::from("  m          Move selected/current file(s)"),
+        Line::from("  R          Rename selected/current file(s)"),
+        Line::from("  E          Export photo database"),
+        Line::from("  /          Semantic search photos"),
         Line::from("  ?          Show this help"),
         Line::from("  q          Quit"),
         Line::from(""),

@@ -96,4 +96,75 @@ CREATE TABLE IF NOT EXISTS llm_queue (
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_queue_status ON llm_queue(status);
+
+-- CLIP/Vision embeddings for semantic search
+CREATE TABLE IF NOT EXISTS embeddings (
+    photo_id INTEGER PRIMARY KEY,
+    embedding BLOB NOT NULL,  -- float32 array stored as bytes
+    embedding_dim INTEGER NOT NULL,  -- 512, 768, or 1024 depending on model
+    model_name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model_name);
+
+-- People: named individuals for face grouping
+CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
+
+-- Faces: detected faces in photos with bounding boxes and embeddings
+CREATE TABLE IF NOT EXISTS faces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id INTEGER NOT NULL,
+    bbox_x INTEGER NOT NULL,  -- Bounding box x coordinate
+    bbox_y INTEGER NOT NULL,  -- Bounding box y coordinate
+    bbox_w INTEGER NOT NULL,  -- Bounding box width
+    bbox_h INTEGER NOT NULL,  -- Bounding box height
+    embedding BLOB,           -- Face embedding for similarity matching
+    embedding_dim INTEGER,    -- Embedding dimension
+    person_id INTEGER,        -- NULL until assigned to a person
+    confidence REAL,          -- Detection confidence (0-1)
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+    FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_faces_photo ON faces(photo_id);
+CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
+
+-- Face clusters: temporary groupings before user names them
+CREATE TABLE IF NOT EXISTS face_clusters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    representative_face_id INTEGER,  -- The "best" face in this cluster
+    auto_name TEXT,                  -- Auto-generated name like "Person 1"
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (representative_face_id) REFERENCES faces(id) ON DELETE SET NULL
+);
+
+-- Face to cluster mapping (many faces can belong to one cluster)
+CREATE TABLE IF NOT EXISTS face_cluster_members (
+    face_id INTEGER NOT NULL,
+    cluster_id INTEGER NOT NULL,
+    similarity_score REAL,  -- How similar to cluster representative
+    PRIMARY KEY (face_id, cluster_id),
+    FOREIGN KEY (face_id) REFERENCES faces(id) ON DELETE CASCADE,
+    FOREIGN KEY (cluster_id) REFERENCES face_clusters(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_face_cluster_members_cluster ON face_cluster_members(cluster_id);
+
+-- Track which photos have been scanned for faces (even if 0 faces found)
+CREATE TABLE IF NOT EXISTS face_scans (
+    photo_id INTEGER PRIMARY KEY,
+    scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    faces_found INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+);
 "#;
