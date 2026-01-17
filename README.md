@@ -120,4 +120,5 @@ Clepho stores photo metadata in SQLite at `~/.local/share/clepho/clepho.db`. The
 
 ## License
 
-MIT
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
