@@ -18,6 +18,9 @@ pub struct Config {
 
     #[serde(default)]
     pub trash: TrashConfig,
+
+    #[serde(default)]
+    pub thumbnails: ThumbnailConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +55,34 @@ impl Default for TrashConfig {
             path: default_trash_path(),
             max_age_days: default_max_age_days(),
             max_size_bytes: default_max_size_bytes(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThumbnailConfig {
+    #[serde(default = "default_thumb_cache_path")]
+    pub path: PathBuf,
+
+    #[serde(default = "default_thumb_cache_size")]
+    pub size: u32,
+}
+
+fn default_thumb_cache_path() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from(".cache"))
+        .join("clepho/thumbnails")
+}
+
+fn default_thumb_cache_size() -> u32 {
+    256
+}
+
+impl Default for ThumbnailConfig {
+    fn default() -> Self {
+        Self {
+            path: default_thumb_cache_path(),
+            size: default_thumb_cache_size(),
         }
     }
 }
@@ -112,6 +143,11 @@ pub struct PreviewConfig {
 
     #[serde(default = "default_thumbnail_size")]
     pub thumbnail_size: u32,
+
+    /// External viewer application for right-click open (e.g., "feh", "eog", "gimp")
+    /// If not set, uses system default (xdg-open on Linux, open on macOS)
+    #[serde(default)]
+    pub external_viewer: Option<String>,
 }
 
 fn default_preview_enabled() -> bool {
@@ -128,6 +164,7 @@ impl Default for PreviewConfig {
             image_preview: default_preview_enabled(),
             protocol: ImageProtocol::default(),
             thumbnail_size: default_thumbnail_size(),
+            external_viewer: None,
         }
     }
 }
@@ -164,7 +201,8 @@ fn default_image_extensions() -> Vec<String> {
 }
 
 fn default_similarity_threshold() -> u32 {
-    10 // Hamming distance threshold for perceptual hash similarity
+    50 // Hamming distance threshold for perceptual hash similarity (~20% of 256 bits)
+       // Higher values catch more edited versions (borders, contrast) but may have false positives
 }
 
 impl Default for ScannerConfig {
@@ -184,6 +222,7 @@ impl Default for Config {
             scanner: ScannerConfig::default(),
             preview: PreviewConfig::default(),
             trash: TrashConfig::default(),
+            thumbnails: ThumbnailConfig::default(),
         }
     }
 }

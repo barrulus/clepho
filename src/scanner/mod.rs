@@ -1,10 +1,12 @@
 pub mod discovery;
 pub mod hashing;
 pub mod metadata;
+pub mod thumbnails;
 
 use anyhow::Result;
+use rayon::prelude::*;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 
@@ -15,6 +17,7 @@ use crate::tasks::{TaskUpdate, TaskProgress};
 pub use discovery::discover_images;
 pub use hashing::HashResult;
 pub use metadata::ImageMetadata;
+pub use thumbnails::ThumbnailManager;
 
 #[derive(Debug, Clone)]
 pub struct ScannedPhoto {
@@ -28,14 +31,17 @@ pub struct ScannedPhoto {
 
 pub struct Scanner {
     config: Config,
+    thumbnail_manager: ThumbnailManager,
 }
 
 impl Scanner {
     pub fn new(config: Config) -> Self {
-        Self { config }
+        let thumbnail_manager = ThumbnailManager::new(&config.thumbnails);
+        Self { config, thumbnail_manager }
     }
 
     /// Scan directory with cancellation support via TaskUpdate protocol.
+    /// Uses parallel processing for faster scanning.
     pub fn scan_directory_cancellable(
         &self,
         directory: &PathBuf,
@@ -57,34 +63,62 @@ impl Scanner {
         let total = image_paths.len();
         let _ = tx.send(TaskUpdate::Started { total });
 
+        if total == 0 {
+            let _ = tx.send(TaskUpdate::Completed {
+                message: "No images found".to_string(),
+            });
+            return;
+        }
+
+        // Progress counter for parallel processing
+        let progress_counter = Arc::new(AtomicUsize::new(0));
+
+        // Process images in parallel
+        let tx_clone = tx.clone();
+        let cancel_clone = cancel_flag.clone();
+        let progress_clone = progress_counter.clone();
+
+        let scanned_photos: Vec<(PathBuf, Result<ScannedPhoto>)> = image_paths
+            .par_iter()
+            .map(|path| {
+                // Check for cancellation
+                if cancel_clone.load(Ordering::SeqCst) {
+                    return (path.clone(), Err(anyhow::anyhow!("Cancelled")));
+                }
+
+                // Update progress
+                let current = progress_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                let filename = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let _ = tx_clone.send(TaskUpdate::Progress(
+                    TaskProgress::new(current, total).with_item(&filename)
+                ));
+
+                // Scan the file (expensive operation - done in parallel)
+                let result = self.scan_single_file(path);
+                (path.clone(), result)
+            })
+            .collect();
+
+        // Check if cancelled during parallel processing
+        if cancel_flag.load(Ordering::SeqCst) {
+            let _ = tx.send(TaskUpdate::Cancelled);
+            return;
+        }
+
+        // Insert/update database sequentially (SQLite prefers this)
         let mut scanned = 0;
         let mut new_count = 0;
         let mut updated_count = 0;
 
-        for (index, path) in image_paths.iter().enumerate() {
-            // Check for cancellation
-            if cancel_flag.load(Ordering::SeqCst) {
-                let _ = tx.send(TaskUpdate::Cancelled);
-                return;
-            }
-
-            let path_str = path.to_string_lossy().to_string();
-            let filename = path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path_str.clone());
-
-            let _ = tx.send(TaskUpdate::Progress(
-                TaskProgress::new(index + 1, total).with_item(&filename)
-            ));
-
-            match self.scan_single_file(path) {
+        for (path, result) in scanned_photos {
+            match result {
                 Ok(photo) => {
-                    // Check if photo already exists in database
-                    match self.photo_exists(db, path) {
+                    match self.photo_exists(db, &path) {
                         Ok(exists) => {
                             if exists {
                                 if let Err(e) = self.update_photo(db, &photo) {
-                                    // Log error but continue
                                     eprintln!("Error updating {}: {}", path.display(), e);
                                 } else {
                                     updated_count += 1;
@@ -104,7 +138,9 @@ impl Scanner {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error scanning {}: {}", path.display(), e);
+                    if !e.to_string().contains("Cancelled") {
+                        eprintln!("Error scanning {}: {}", path.display(), e);
+                    }
                 }
             }
         }
@@ -130,6 +166,9 @@ impl Scanner {
 
         // Calculate hashes
         let hashes = hashing::calculate_hashes(path).ok();
+
+        // Generate thumbnail (cached)
+        let _ = self.thumbnail_manager.generate(path);
 
         Ok(ScannedPhoto {
             path: path.clone(),

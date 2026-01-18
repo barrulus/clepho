@@ -50,6 +50,9 @@ dirs = "5"
 # DateTime handling
 chrono = { version = "0.4", features = ["serde"] }
 
+# Parallel processing
+rayon = "1.10"
+
 # Base64 for image encoding
 base64 = "0.22"
 

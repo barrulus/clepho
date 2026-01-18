@@ -102,7 +102,7 @@ impl App {
     pub fn new(config: Config, db: Database) -> Result<Self> {
         let current_dir = std::env::current_dir()?;
         let llm_client = LlmClient::new(&config.llm.endpoint, &config.llm.model);
-        let image_preview = ImagePreviewState::new(config.preview.protocol);
+        let image_preview = ImagePreviewState::new(config.preview.protocol, &config.thumbnails);
         let trash_manager = TrashManager::new(config.trash.clone());
         let mut app = Self {
             config,
@@ -454,22 +454,27 @@ impl App {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Result<()> {
+        // Calculate pane layout for all mouse events
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(20),
+                Constraint::Percentage(40),
+                Constraint::Percentage(40),
+            ])
+            .split(area);
+
+        let x = mouse.column;
+        let y = mouse.row;
+
+        // Determine which pane the mouse is in
+        let in_parent_pane = x < chunks[0].right() && y >= chunks[0].y && y < chunks[0].bottom();
+        let in_current_pane = x >= chunks[1].x && x < chunks[1].right() && y >= chunks[1].y && y < chunks[1].bottom();
+        let in_preview_pane = x >= chunks[2].x && x < chunks[2].right() && y >= chunks[2].y && y < chunks[2].bottom();
+
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                // Calculate which pane was clicked based on the layout
-                let chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(20),
-                        Constraint::Percentage(40),
-                        Constraint::Percentage(40),
-                    ])
-                    .split(area);
-
-                let x = mouse.column;
-                let y = mouse.row;
-
-                if x < chunks[0].right() && y >= chunks[0].y && y < chunks[0].bottom() {
+                if in_parent_pane {
                     // Clicked in parent pane
                     let clicked_index = (y - chunks[0].y - 1) as usize + self.parent_scroll_offset;
                     if clicked_index < self.parent_entries.len() {
@@ -480,18 +485,73 @@ impl App {
                             self.load_directory(&path)?;
                         }
                     }
-                } else if x < chunks[1].right() && y >= chunks[1].y && y < chunks[1].bottom() {
+                } else if in_current_pane {
                     // Clicked in current pane
                     let clicked_index = (y - chunks[1].y - 1) as usize + self.scroll_offset;
                     if clicked_index < self.entries.len() {
                         self.selected_index = clicked_index;
+                        // Navigate into directory if clicked on one (like yazi)
+                        if self.entries[clicked_index].is_dir {
+                            let path = self.entries[clicked_index].path.clone();
+                            self.load_directory(&path)?;
+                        }
+                        self.image_preview.reset_scroll();
+                    }
+                }
+                // Left click in preview pane - terminal handles text selection with Shift+drag
+            }
+            MouseEventKind::Down(crossterm::event::MouseButton::Right) => {
+                // Right click to open with system default application
+                if let Some(entry) = self.selected_entry().cloned() {
+                    if !entry.is_dir {
+                        self.open_with_system(&entry.path)?;
                     }
                 }
             }
-            MouseEventKind::ScrollDown => self.move_down(),
-            MouseEventKind::ScrollUp => self.move_up(),
+            MouseEventKind::ScrollDown => {
+                if in_preview_pane {
+                    // Scroll preview text down
+                    self.image_preview.scroll_down(3);
+                } else {
+                    // Scroll file list down
+                    self.move_down();
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if in_preview_pane {
+                    // Scroll preview text up
+                    self.image_preview.scroll_up(3);
+                } else {
+                    // Scroll file list up
+                    self.move_up();
+                }
+            }
             _ => {}
         }
+
+        Ok(())
+    }
+
+    /// Open a file with the system default application or configured viewer
+    fn open_with_system(&self, path: &std::path::Path) -> Result<()> {
+        let opener = if let Some(ref viewer) = self.config.preview.external_viewer {
+            viewer.as_str()
+        } else {
+            // Use system default
+            #[cfg(target_os = "linux")]
+            { "xdg-open" }
+            #[cfg(target_os = "macos")]
+            { "open" }
+            #[cfg(target_os = "windows")]
+            { "start" }
+            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+            { "xdg-open" }
+        };
+
+        std::process::Command::new(opener)
+            .arg(path)
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to open file: {}", e))?;
 
         Ok(())
     }

@@ -46,18 +46,26 @@ pub fn calculate_hashes(path: &PathBuf) -> Result<HashResult> {
 fn calculate_perceptual_hash(path: &PathBuf) -> Result<String> {
     use img_hash::HasherConfig;
 
-    // Open and decode the image using img_hash's re-exported image crate
-    let image = img_hash::image::open(path)?;
+    // Open and decode image - use thumbnail() which is optimized for small output
+    let img = image::open(path)?;
 
-    // Create a hasher with default configuration
+    // Create small thumbnail - this is what we'll hash
+    // thumbnail() preserves aspect ratio and is faster than resize for large images
+    let thumbnail = img.thumbnail(64, 64);
+
     let hasher = HasherConfig::new()
-        .hash_size(16, 16) // 16x16 = 256 bits for better precision
+        .hash_size(16, 16)
         .to_hasher();
 
-    // Calculate the hash
-    let hash = hasher.hash_image(&image);
+    // Convert thumbnail to img_hash format
+    let rgba = thumbnail.to_rgba8();
+    let (width, height) = rgba.dimensions();
 
-    // Convert to base64 string for storage
+    let img_hash_image = img_hash::image::RgbaImage::from_raw(width, height, rgba.into_raw())
+        .ok_or_else(|| anyhow!("Failed to create image for hashing"))?;
+
+    let hash = hasher.hash_image(&img_hash::image::DynamicImage::ImageRgba8(img_hash_image));
+
     Ok(hash.to_base64())
 }
 

@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::app::App;
-use crate::config::ImageProtocol;
+use crate::config::{ImageProtocol, ThumbnailConfig};
 use crate::db::BoundingBox;
+use crate::scanner::ThumbnailManager;
 
 /// Cached metadata for an image
 #[derive(Clone)]
@@ -56,14 +57,17 @@ pub struct ImagePreviewState {
     face_receiver: Option<mpsc::Receiver<(PathBuf, DynamicImage)>>,
     /// Sender for async face crop loading
     face_sender: mpsc::Sender<(PathBuf, DynamicImage)>,
+    /// Thumbnail manager for accessing pre-generated thumbnails
+    thumbnail_manager: ThumbnailManager,
 }
 
 impl ImagePreviewState {
-    pub fn new(protocol: ImageProtocol) -> Self {
+    pub fn new(protocol: ImageProtocol, thumbnail_config: &ThumbnailConfig) -> Self {
         let picker = Self::create_picker(protocol);
         let (meta_tx, meta_rx) = mpsc::channel();
         let (img_tx, img_rx) = mpsc::channel();
         let (face_tx, face_rx) = mpsc::channel();
+        let thumbnail_manager = ThumbnailManager::new(thumbnail_config);
         Self {
             picker,
             image_cache: HashMap::new(),
@@ -81,6 +85,7 @@ impl ImagePreviewState {
             loading_faces: HashSet::new(),
             face_receiver: Some(face_rx),
             face_sender: face_tx,
+            thumbnail_manager,
         }
     }
 
@@ -244,13 +249,23 @@ impl ImagePreviewState {
             let sender = self.image_sender.clone();
             let size = thumbnail_size;
 
+            // Check for pre-generated thumbnail from scan
+            let cached_thumb = self.thumbnail_manager.get_cached_path(path);
+
             std::thread::spawn(move || {
-                if let Ok(dyn_img) = image::ImageReader::open(&path_clone)
-                    .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                {
-                    // Resize in background thread using high-quality Lanczos3 filter
-                    let resized = dyn_img.resize(size, size, FilterType::Lanczos3);
-                    let _ = sender.send((path_clone, resized));
+                // Try to load from thumbnail cache first (much faster - small JPEG)
+                let load_result = if let Some(thumb_path) = cached_thumb {
+                    image::ImageReader::open(&thumb_path)
+                        .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+                } else {
+                    // Fall back to loading original and resizing
+                    image::ImageReader::open(&path_clone)
+                        .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+                        .map(|img| img.resize(size, size, FilterType::Lanczos3))
+                };
+
+                if let Ok(dyn_img) = load_result {
+                    let _ = sender.send((path_clone, dyn_img));
                 }
             });
         }
@@ -345,7 +360,7 @@ impl ImagePreviewState {
 
 impl Default for ImagePreviewState {
     fn default() -> Self {
-        Self::new(ImageProtocol::Auto)
+        Self::new(ImageProtocol::Auto, &ThumbnailConfig::default())
     }
 }
 
