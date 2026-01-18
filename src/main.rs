@@ -6,6 +6,7 @@ mod faces;
 mod llm;
 mod scanner;
 mod tasks;
+mod trash;
 mod ui;
 
 use anyhow::Result;

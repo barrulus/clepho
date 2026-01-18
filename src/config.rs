@@ -15,6 +15,45 @@ pub struct Config {
 
     #[serde(default)]
     pub preview: PreviewConfig,
+
+    #[serde(default)]
+    pub trash: TrashConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashConfig {
+    #[serde(default = "default_trash_path")]
+    pub path: PathBuf,
+
+    #[serde(default = "default_max_age_days")]
+    pub max_age_days: u32,
+
+    #[serde(default = "default_max_size_bytes")]
+    pub max_size_bytes: u64,
+}
+
+fn default_trash_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
+        .join("clepho/.trash")
+}
+
+fn default_max_age_days() -> u32 {
+    30
+}
+
+fn default_max_size_bytes() -> u64 {
+    1024 * 1024 * 1024 // 1GB
+}
+
+impl Default for TrashConfig {
+    fn default() -> Self {
+        Self {
+            path: default_trash_path(),
+            max_age_days: default_max_age_days(),
+            max_size_bytes: default_max_size_bytes(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -144,6 +183,7 @@ impl Default for Config {
             llm: LlmConfig::default(),
             scanner: ScannerConfig::default(),
             preview: PreviewConfig::default(),
+            trash: TrashConfig::default(),
         }
     }
 }

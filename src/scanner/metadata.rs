@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -27,6 +28,9 @@ pub struct ImageMetadata {
     // GPS
     pub gps_latitude: Option<f64>,
     pub gps_longitude: Option<f64>,
+
+    // Complete EXIF data as JSON string
+    pub all_exif: Option<String>,
 }
 
 pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
@@ -133,10 +137,123 @@ pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
                     }
                 }
             }
+
+            // Extract all EXIF fields as JSON
+            metadata.all_exif = extract_all_exif(&exif);
         }
     }
 
     Ok(metadata)
+}
+
+/// Extract all EXIF fields from the image and serialize to JSON
+fn extract_all_exif(exif: &exif::Exif) -> Option<String> {
+    use exif::In;
+
+    let mut all_fields: HashMap<String, serde_json::Value> = HashMap::new();
+
+    for field in exif.fields() {
+        let tag_name = field.tag.to_string();
+        let ifd = match field.ifd_num {
+            In::PRIMARY => "primary",
+            In::THUMBNAIL => "thumbnail",
+            _ => "other",
+        };
+
+        let key = format!("{}:{}", ifd, tag_name);
+        let value = serialize_exif_value(&field.value);
+        all_fields.insert(key, value);
+    }
+
+    serde_json::to_string(&all_fields).ok()
+}
+
+/// Serialize an EXIF value to a JSON value
+fn serialize_exif_value(value: &exif::Value) -> serde_json::Value {
+    use exif::Value;
+    use serde_json::json;
+
+    match value {
+        Value::Byte(v) => json!(v),
+        Value::Ascii(v) => {
+            let strings: Vec<String> = v.iter()
+                .map(|b| String::from_utf8_lossy(b).to_string())
+                .collect();
+            if strings.len() == 1 {
+                json!(strings[0])
+            } else {
+                json!(strings)
+            }
+        }
+        Value::Short(v) => {
+            if v.len() == 1 {
+                json!(v[0])
+            } else {
+                json!(v)
+            }
+        }
+        Value::Long(v) => {
+            if v.len() == 1 {
+                json!(v[0])
+            } else {
+                json!(v)
+            }
+        }
+        Value::Rational(v) => {
+            let floats: Vec<f64> = v.iter().map(|r| r.num as f64 / r.denom as f64).collect();
+            if floats.len() == 1 {
+                json!(floats[0])
+            } else {
+                json!(floats)
+            }
+        }
+        Value::SByte(v) => json!(v),
+        Value::Undefined(v, _) => {
+            // Skip large binary blobs, just note the size
+            if v.len() > 1024 {
+                json!({"type": "binary", "size": v.len()})
+            } else {
+                json!(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v))
+            }
+        }
+        Value::SShort(v) => {
+            if v.len() == 1 {
+                json!(v[0])
+            } else {
+                json!(v)
+            }
+        }
+        Value::SLong(v) => {
+            if v.len() == 1 {
+                json!(v[0])
+            } else {
+                json!(v)
+            }
+        }
+        Value::SRational(v) => {
+            let floats: Vec<f64> = v.iter().map(|r| r.num as f64 / r.denom as f64).collect();
+            if floats.len() == 1 {
+                json!(floats[0])
+            } else {
+                json!(floats)
+            }
+        }
+        Value::Float(v) => {
+            if v.len() == 1 {
+                json!(v[0])
+            } else {
+                json!(v)
+            }
+        }
+        Value::Double(v) => {
+            if v.len() == 1 {
+                json!(v[0])
+            } else {
+                json!(v)
+            }
+        }
+        Value::Unknown(t, c, o) => json!({"unknown_type": t, "count": c, "offset": o}),
+    }
 }
 
 fn dms_to_decimal(degrees: f64, minutes: f64, seconds: f64) -> f64 {

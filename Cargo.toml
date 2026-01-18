@@ -47,6 +47,9 @@ thiserror = "2"
 # Directories
 dirs = "5"
 
+# DateTime handling
+chrono = { version = "0.4", features = ["serde"] }
+
 # Base64 for image encoding
 base64 = "0.22"
 

@@ -6,7 +6,7 @@ use ratatui::{
 pub fn render_help(frame: &mut Frame, area: Rect) {
     // Center the help dialog
     let dialog_width = 60.min(area.width.saturating_sub(4));
-    let dialog_height = 32.min(area.height.saturating_sub(4));
+    let dialog_height = 33.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -44,6 +44,7 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  F          Detect faces in photos"),
         Line::from("  C          Cluster similar faces together"),
         Line::from("  T          View/manage running tasks"),
+        Line::from("  t          View/manage trash"),
         Line::from("  m          Move selected/current file(s)"),
         Line::from("  R          Rename selected/current file(s)"),
         Line::from("  E          Export photo database"),

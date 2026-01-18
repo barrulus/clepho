@@ -224,7 +224,7 @@ fn render_photo_details(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
 
 pub fn render_help(frame: &mut Frame, area: Rect) {
     let dialog_width = 50.min(area.width.saturating_sub(4));
-    let dialog_height = 16.min(area.height.saturating_sub(4));
+    let dialog_height = 17.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -240,7 +240,8 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  J/K      Move between groups"),
         Line::from("  Space    Toggle deletion mark"),
         Line::from("  a        Auto-select (keep best)"),
-        Line::from("  x        Execute deletions"),
+        Line::from("  x        Move marked to trash"),
+        Line::from("  X        Permanently delete marked"),
         Line::from("  Esc      Exit duplicates view"),
         Line::from("  ?        Toggle this help"),
         Line::from(""),

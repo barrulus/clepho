@@ -9,6 +9,7 @@ pub mod rename_dialog;
 pub mod search_dialog;
 mod status_bar;
 mod task_list_dialog;
+pub mod trash_dialog;
 
 use ratatui::prelude::*;
 
@@ -95,5 +96,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Render task list dialog if in task list mode
     if app.mode == AppMode::TaskList {
         task_list_dialog::render(frame, app);
+    }
+
+    // Render trash dialog if in trash viewing mode
+    if app.mode == AppMode::TrashViewing {
+        if let Some(ref dialog) = app.trash_dialog {
+            trash_dialog::render(frame, dialog, area);
+        }
     }
 }

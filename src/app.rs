@@ -11,6 +11,7 @@ use crate::db::Database;
 use crate::llm::LlmClient;
 use crate::scanner::Scanner;
 use crate::tasks::{BackgroundTaskManager, TaskType, TaskUpdate};
+use crate::trash::TrashManager;
 use crate::ui;
 use crate::ui::duplicates::DuplicatesView;
 use crate::ui::export_dialog::ExportDialog;
@@ -19,6 +20,7 @@ use crate::ui::preview::ImagePreviewState;
 use crate::ui::rename_dialog::RenameDialog;
 use crate::ui::search_dialog::SearchDialog;
 use crate::ui::people_dialog::PeopleDialog;
+use crate::ui::trash_dialog::TrashDialog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -41,6 +43,7 @@ pub enum AppMode {
     Searching,
     PeopleManaging,
     TaskList,
+    TrashViewing,
 }
 
 #[allow(dead_code)]
@@ -82,6 +85,9 @@ pub struct App {
     pub people_dialog: Option<PeopleDialog>,
     // Background task manager
     pub task_manager: BackgroundTaskManager,
+    // Trash manager and dialog
+    pub trash_manager: TrashManager,
+    pub trash_dialog: Option<TrashDialog>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +103,7 @@ impl App {
         let current_dir = std::env::current_dir()?;
         let llm_client = LlmClient::new(&config.llm.endpoint, &config.llm.model);
         let image_preview = ImagePreviewState::new(config.preview.protocol);
+        let trash_manager = TrashManager::new(config.trash.clone());
         let mut app = Self {
             config,
             db,
@@ -124,6 +131,8 @@ impl App {
             search_dialog: None,
             people_dialog: None,
             task_manager: BackgroundTaskManager::new(),
+            trash_manager,
+            trash_dialog: None,
         };
         app.load_directory(&current_dir)?;
         Ok(app)
@@ -273,6 +282,11 @@ impl App {
         // Handle TaskList mode
         if self.mode == AppMode::TaskList {
             return self.handle_task_list_key(key);
+        }
+
+        // Handle TrashViewing mode
+        if self.mode == AppMode::TrashViewing {
+            return self.handle_trash_dialog_key(key);
         }
 
         // Handle Visual mode - j/k extends selection, Esc exits
@@ -429,6 +443,9 @@ impl App {
             KeyCode::Char('T') => {
                 self.mode = AppMode::TaskList;
             }
+
+            // Trash dialog
+            KeyCode::Char('t') => self.open_trash_dialog()?,
 
             _ => {}
         }
@@ -686,8 +703,37 @@ impl App {
                 }
             }
 
-            // Execute deletions (delete files and remove from DB)
+            // Move marked to trash (safe deletion)
             KeyCode::Char('x') => {
+                let marked = self.db.get_marked_not_trashed()?;
+                if marked.is_empty() {
+                    self.status_message = Some("No photos marked for deletion".to_string());
+                } else {
+                    let mut moved = 0;
+                    for photo in &marked {
+                        let path = std::path::PathBuf::from(&photo.path);
+                        match self.trash_manager.move_to_trash(&path) {
+                            Ok(trash_path) => {
+                                if let Err(e) = self.db.mark_trashed(photo.id, &trash_path) {
+                                    self.status_message = Some(format!("DB error: {}", e));
+                                } else {
+                                    moved += 1;
+                                }
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Error moving to trash: {}", e));
+                            }
+                        }
+                    }
+                    self.status_message = Some(format!("Moved {} files to trash", moved));
+
+                    // Refresh duplicates view
+                    self.find_duplicates()?;
+                }
+            }
+
+            // Permanently delete marked photos (dangerous)
+            KeyCode::Char('X') => {
                 let marked = self.db.get_marked_for_deletion()?;
                 if marked.is_empty() {
                     self.status_message = Some("No photos marked for deletion".to_string());
@@ -701,7 +747,7 @@ impl App {
                     }
                     // Remove from database
                     self.db.delete_marked_photos()?;
-                    self.status_message = Some(format!("Deleted {} photos", count));
+                    self.status_message = Some(format!("Permanently deleted {} photos", count));
 
                     // Refresh duplicates view
                     self.find_duplicates()?;
@@ -1409,6 +1455,117 @@ impl App {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    // --- Trash dialog methods ---
+
+    fn open_trash_dialog(&mut self) -> Result<()> {
+        let trashed = self.db.get_trashed_photos()?;
+        let total_size = self.db.get_trash_total_size()?;
+        self.trash_dialog = Some(TrashDialog::new(
+            trashed,
+            total_size,
+            self.trash_manager.max_size_bytes(),
+        ));
+        self.mode = AppMode::TrashViewing;
+        Ok(())
+    }
+
+    fn handle_trash_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.trash_dialog.is_none() {
+            self.mode = AppMode::Normal;
+            return Ok(());
+        }
+
+        let dialog = self.trash_dialog.as_mut().unwrap();
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.trash_dialog = None;
+                self.mode = AppMode::Normal;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                dialog.move_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                dialog.move_up();
+            }
+            // Restore selected file
+            KeyCode::Enter | KeyCode::Char('r') => {
+                if let Some(entry) = dialog.selected_entry() {
+                    let photo_id = entry.id;
+                    let trash_path = std::path::PathBuf::from(&entry.path);
+                    let original_path = std::path::PathBuf::from(&entry.original_path);
+
+                    match self.trash_manager.restore(&trash_path, &original_path) {
+                        Ok(_) => {
+                            if let Err(e) = self.db.restore_photo(photo_id) {
+                                self.status_message = Some(format!("DB error: {}", e));
+                            } else {
+                                self.status_message = Some(format!("Restored to {}", original_path.display()));
+                                // Refresh dialog
+                                let trashed = self.db.get_trashed_photos()?;
+                                let total_size = self.db.get_trash_total_size()?;
+                                dialog.refresh(trashed, total_size);
+                            }
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Restore error: {}", e));
+                        }
+                    }
+                }
+            }
+            // Permanently delete selected file
+            KeyCode::Char('d') => {
+                if let Some(entry) = dialog.selected_entry() {
+                    let photo_id = entry.id;
+                    let trash_path = std::path::PathBuf::from(&entry.path);
+
+                    match self.trash_manager.delete_permanently(&trash_path) {
+                        Ok(_) => {
+                            if let Err(e) = self.db.delete_trashed_photo(photo_id) {
+                                self.status_message = Some(format!("DB error: {}", e));
+                            } else {
+                                self.status_message = Some("Permanently deleted".to_string());
+                                // Refresh dialog
+                                let trashed = self.db.get_trashed_photos()?;
+                                let total_size = self.db.get_trash_total_size()?;
+                                dialog.refresh(trashed, total_size);
+                            }
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Delete error: {}", e));
+                        }
+                    }
+                }
+            }
+            // Cleanup old files
+            KeyCode::Char('c') => {
+                let max_age = self.trash_manager.max_age_days();
+                let old_photos = self.db.get_old_trashed_photos(max_age)?;
+                let mut deleted = 0;
+                for photo in &old_photos {
+                    let trash_path = std::path::PathBuf::from(&photo.path);
+                    if self.trash_manager.delete_permanently(&trash_path).is_ok() {
+                        if self.db.delete_trashed_photo(photo.id).is_ok() {
+                            deleted += 1;
+                        }
+                    }
+                }
+                if deleted > 0 {
+                    self.status_message = Some(format!("Cleaned up {} old files", deleted));
+                    // Refresh dialog
+                    let trashed = self.db.get_trashed_photos()?;
+                    let total_size = self.db.get_trash_total_size()?;
+                    dialog.refresh(trashed, total_size);
+                } else {
+                    self.status_message = Some("No files older than limit".to_string());
+                }
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 

@@ -2,6 +2,7 @@ mod schema;
 pub mod embeddings;
 pub mod faces;
 pub mod similarity;
+pub mod trash;
 
 use anyhow::Result;
 use rusqlite::Connection;

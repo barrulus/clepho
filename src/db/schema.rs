@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS photos (
     gps_latitude REAL,
     gps_longitude REAL,
 
+    -- Complete EXIF data as JSON
+    all_exif TEXT,
+
     -- Hashes for duplicate detection
     md5_hash TEXT,
     sha256_hash TEXT,
@@ -39,7 +42,11 @@ CREATE TABLE IF NOT EXISTS photos (
 
     -- User actions
     marked_for_deletion INTEGER DEFAULT 0,
-    is_favorite INTEGER DEFAULT 0
+    is_favorite INTEGER DEFAULT 0,
+
+    -- Trash tracking
+    original_path TEXT,      -- Path before moving to trash
+    trashed_at TEXT          -- ISO timestamp when trashed
 );
 
 -- Indexes for common queries
