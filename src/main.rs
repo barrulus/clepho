@@ -5,6 +5,7 @@ mod export;
 mod faces;
 mod llm;
 mod scanner;
+mod tasks;
 mod ui;
 
 use anyhow::Result;

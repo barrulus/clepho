@@ -3,13 +3,14 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent,
 use ratatui::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::config::Config;
 use crate::db::Database;
 use crate::llm::LlmClient;
 use crate::scanner::Scanner;
+use crate::tasks::{BackgroundTaskManager, TaskType, TaskUpdate};
 use crate::ui;
 use crate::ui::duplicates::DuplicatesView;
 use crate::ui::export_dialog::ExportDialog;
@@ -18,9 +19,6 @@ use crate::ui::preview::ImagePreviewState;
 use crate::ui::rename_dialog::RenameDialog;
 use crate::ui::search_dialog::SearchDialog;
 use crate::ui::people_dialog::PeopleDialog;
-use crate::faces::{FaceProcessor, FaceProcessingStatus};
-
-pub use crate::scanner::ScanProgress;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -34,18 +32,15 @@ pub enum ActivePane {
 pub enum AppMode {
     Normal,
     Help,
-    Scanning,
     Duplicates,
     DuplicatesHelp,
-    LlmProcessing,
-    LlmBatchProcessing,
     Visual,
     Moving,
     Renaming,
     Exporting,
     Searching,
-    FaceScanning,
     PeopleManaging,
+    TaskList,
 }
 
 #[allow(dead_code)]
@@ -64,19 +59,11 @@ pub struct App {
     pub should_quit: bool,
     pub status_message: Option<String>,
     pub g_pressed: bool,
-    // Scanning state
-    pub scan_progress: Option<ScanProgress>,
-    pub scan_receiver: Option<mpsc::Receiver<ScanProgress>>,
     // Duplicates view
     pub duplicates_view: Option<DuplicatesView>,
     // LLM state
     pub llm_client: LlmClient,
     pub llm_descriptions: HashMap<PathBuf, String>,
-    pub llm_pending_path: Option<PathBuf>,
-    pub llm_receiver: Option<mpsc::Receiver<Result<String, String>>>,
-    // Batch LLM processing state
-    pub llm_batch_receiver: Option<mpsc::Receiver<crate::llm::LlmTaskStatus>>,
-    pub llm_batch_progress: Option<(usize, usize)>, // (current, total)
     // Image preview state
     pub image_preview: ImagePreviewState,
     // Multi-select state
@@ -93,10 +80,8 @@ pub struct App {
     pub search_dialog: Option<SearchDialog>,
     // People dialog state
     pub people_dialog: Option<PeopleDialog>,
-    // Face scanning state
-    pub face_scan_receiver: Option<mpsc::Receiver<FaceProcessingStatus>>,
-    pub face_scan_progress: Option<(usize, usize)>,
-    pub face_scan_start: Option<std::time::Instant>,
+    // Background task manager
+    pub task_manager: BackgroundTaskManager,
 }
 
 #[derive(Debug, Clone)]
@@ -105,7 +90,6 @@ pub struct DirEntry {
     pub path: PathBuf,
     pub is_dir: bool,
     pub size: u64,
-    pub modified: Option<std::time::SystemTime>,
 }
 
 impl App {
@@ -128,15 +112,9 @@ impl App {
             should_quit: false,
             status_message: None,
             g_pressed: false,
-            scan_progress: None,
-            scan_receiver: None,
             duplicates_view: None,
             llm_client,
             llm_descriptions: HashMap::new(),
-            llm_pending_path: None,
-            llm_receiver: None,
-            llm_batch_receiver: None,
-            llm_batch_progress: None,
             image_preview,
             selected_files: HashSet::new(),
             visual_anchor: None,
@@ -145,9 +123,7 @@ impl App {
             export_dialog: None,
             search_dialog: None,
             people_dialog: None,
-            face_scan_receiver: None,
-            face_scan_progress: None,
-            face_scan_start: None,
+            task_manager: BackgroundTaskManager::new(),
         };
         app.load_directory(&current_dir)?;
         Ok(app)
@@ -189,14 +165,12 @@ impl App {
                 let metadata = entry.metadata().ok();
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
                 let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                let modified = metadata.as_ref().and_then(|m| m.modified().ok());
 
                 entries.push(DirEntry {
                     name: entry.file_name().to_string_lossy().to_string(),
                     path: entry.path(),
                     is_dir,
                     size,
-                    modified,
                 });
             }
         }
@@ -213,14 +187,16 @@ impl App {
 
     pub async fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
         while !self.should_quit {
-            // Check for scan progress updates
-            self.update_scan_progress();
-            // Check for LLM results
-            self.update_llm_progress();
-            // Check for batch LLM progress
-            self.update_batch_llm_progress();
-            // Check for face scan progress
-            self.update_face_scan_progress();
+            // Poll for task updates and handle completions
+            let completions = self.task_manager.poll_updates();
+            for completion in completions {
+                let prefix = completion.task_type.display_name();
+                if completion.success {
+                    self.status_message = Some(format!("{}: {}", prefix, completion.message));
+                } else {
+                    self.status_message = Some(format!("{} - {}", prefix, completion.message));
+                }
+            }
 
             terminal.draw(|frame| ui::render(frame, self))?;
 
@@ -239,81 +215,6 @@ impl App {
         }
 
         Ok(())
-    }
-
-    fn update_llm_progress(&mut self) {
-        let mut result = None;
-        let mut should_clear = false;
-
-        if let Some(ref receiver) = self.llm_receiver {
-            if let Ok(r) = receiver.try_recv() {
-                result = Some(r);
-                should_clear = true;
-            }
-        }
-
-        if let Some(r) = result {
-            match r {
-                Ok(description) => {
-                    if let Some(path) = self.llm_pending_path.take() {
-                        // Save to database for persistence
-                        if let Err(e) = self.db.save_description(&path, &description) {
-                            self.status_message = Some(format!("Warning: Failed to save to DB: {}", e));
-                        } else {
-                            self.status_message = Some("Description generated and saved".to_string());
-                        }
-                        // Also cache in memory for quick access
-                        self.llm_descriptions.insert(path, description);
-                    }
-                }
-                Err(e) => {
-                    self.llm_pending_path = None;
-                    self.status_message = Some(format!("LLM error: {}", e));
-                }
-            }
-            self.mode = AppMode::Normal;
-        }
-
-        if should_clear {
-            self.llm_receiver = None;
-        }
-    }
-
-    fn update_scan_progress(&mut self) {
-        // Collect all progress updates first to avoid borrow issues
-        let mut updates = Vec::new();
-        let mut should_clear_receiver = false;
-
-        if let Some(ref receiver) = self.scan_receiver {
-            while let Ok(progress) = receiver.try_recv() {
-                if matches!(&progress, ScanProgress::Completed { .. }) {
-                    should_clear_receiver = true;
-                }
-                updates.push(progress);
-            }
-        }
-
-        // Now process the updates
-        for progress in updates {
-            match &progress {
-                ScanProgress::Completed { scanned, new, updated } => {
-                    self.status_message = Some(format!(
-                        "Scan complete: {} scanned, {} new, {} updated",
-                        scanned, new, updated
-                    ));
-                    self.mode = AppMode::Normal;
-                }
-                ScanProgress::Error { message } => {
-                    self.status_message = Some(format!("Scan error: {}", message));
-                }
-                _ => {}
-            }
-            self.scan_progress = Some(progress);
-        }
-
-        if should_clear_receiver {
-            self.scan_receiver = None;
-        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -344,38 +245,6 @@ impl App {
             return self.handle_duplicates_key(key);
         }
 
-        // Handle scanning mode - only allow Escape to cancel
-        if self.mode == AppMode::Scanning {
-            if key.code == KeyCode::Esc {
-                self.mode = AppMode::Normal;
-                self.scan_receiver = None;
-                self.scan_progress = None;
-                self.status_message = Some("Scan cancelled".to_string());
-            }
-            return Ok(());
-        }
-
-        // Handle LLM processing mode - only allow Escape to cancel
-        if self.mode == AppMode::LlmProcessing {
-            if key.code == KeyCode::Esc {
-                self.mode = AppMode::Normal;
-                self.llm_receiver = None;
-                self.status_message = Some("LLM processing cancelled".to_string());
-            }
-            return Ok(());
-        }
-
-        // Handle batch LLM processing mode - only allow Escape to cancel
-        if self.mode == AppMode::LlmBatchProcessing {
-            if key.code == KeyCode::Esc {
-                self.mode = AppMode::Normal;
-                self.llm_batch_receiver = None;
-                self.llm_batch_progress = None;
-                self.status_message = Some("Batch processing cancelled".to_string());
-            }
-            return Ok(());
-        }
-
         // Handle Moving mode
         if self.mode == AppMode::Moving {
             return self.handle_move_dialog_key(key);
@@ -396,21 +265,14 @@ impl App {
             return self.handle_search_dialog_key(key);
         }
 
-        // Handle Face Scanning mode - only allow Escape to cancel
-        if self.mode == AppMode::FaceScanning {
-            if key.code == KeyCode::Esc {
-                self.mode = AppMode::Normal;
-                self.face_scan_receiver = None;
-                self.face_scan_progress = None;
-                self.face_scan_start = None;
-                self.status_message = Some("Face scanning cancelled".to_string());
-            }
-            return Ok(());
-        }
-
         // Handle People Managing mode
         if self.mode == AppMode::PeopleManaging {
             return self.handle_people_dialog_key(key);
+        }
+
+        // Handle TaskList mode
+        if self.mode == AppMode::TaskList {
+            return self.handle_task_list_key(key);
         }
 
         // Handle Visual mode - j/k extends selection, Esc exits
@@ -530,10 +392,16 @@ impl App {
             // Visual mode: V to enter, select range
             KeyCode::Char('V') => self.enter_visual_mode(),
 
-            // Clear selection with Escape (only if there's a selection)
-            KeyCode::Esc if !self.selected_files.is_empty() || self.mode == AppMode::Visual => {
-                self.exit_visual_mode();
-                self.clear_selection();
+            // ESC: Cancel most recent running task, or clear selection
+            KeyCode::Esc => {
+                if self.task_manager.has_running_tasks() {
+                    if self.task_manager.cancel_most_recent() {
+                        self.status_message = Some("Task cancelled".to_string());
+                    }
+                } else if !self.selected_files.is_empty() || self.mode == AppMode::Visual {
+                    self.exit_visual_mode();
+                    self.clear_selection();
+                }
             }
 
             // Move files
@@ -551,8 +419,16 @@ impl App {
             // Face detection on current directory
             KeyCode::Char('F') => self.start_face_scan()?,
 
+            // Face clustering
+            KeyCode::Char('C') => self.cluster_faces()?,
+
             // People management dialog
             KeyCode::Char('p') => self.open_people_dialog()?,
+
+            // Task list dialog
+            KeyCode::Char('T') => {
+                self.mode = AppMode::TaskList;
+            }
 
             _ => {}
         }
@@ -677,15 +553,14 @@ impl App {
 
     fn start_scan(&mut self) -> Result<()> {
         // Don't start a new scan if one is already running
-        if self.mode == AppMode::Scanning {
+        if self.task_manager.is_running(TaskType::Scan) {
+            self.status_message = Some("Scan already running".to_string());
             return Ok(());
         }
 
-        let (tx, rx) = mpsc::channel();
+        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::Scan);
         let dir = self.current_dir.clone();
         let config = self.config.clone();
-
-        // Get a reference to the database path to open a new connection in the thread
         let db_path = self.config.db_path.clone();
 
         // Spawn scanning in a background thread
@@ -693,26 +568,24 @@ impl App {
             let db = match Database::open(&db_path) {
                 Ok(db) => db,
                 Err(e) => {
-                    let _ = tx.send(ScanProgress::Error {
-                        message: format!("Failed to open database: {}", e),
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Failed to open database: {}", e),
                     });
                     return;
                 }
             };
 
             if let Err(e) = db.initialize() {
-                let _ = tx.send(ScanProgress::Error {
-                    message: format!("Failed to initialize database: {}", e),
+                let _ = tx.send(TaskUpdate::Failed {
+                    error: format!("Failed to initialize database: {}", e),
                 });
                 return;
             }
 
             let scanner = Scanner::new(config);
-            let _ = scanner.scan_directory(&dir, &db, Some(tx));
+            scanner.scan_directory_cancellable(&dir, &db, tx, cancel_flag);
         });
 
-        self.scan_receiver = Some(rx);
-        self.mode = AppMode::Scanning;
         self.status_message = Some(format!("Scanning {}...", self.current_dir.display()));
 
         Ok(())
@@ -851,21 +724,47 @@ impl App {
             }
         };
 
-        let (tx, rx) = mpsc::channel();
+        // Don't start if already running LLM single
+        if self.task_manager.is_running(TaskType::LlmSingle) {
+            self.status_message = Some("LLM description already running".to_string());
+            return Ok(());
+        }
+
+        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmSingle);
         let path = entry.path.clone();
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
+        let db_path = self.config.db_path.clone();
 
         // Spawn LLM request in background thread
         std::thread::spawn(move || {
+            // Check cancellation
+            if cancel_flag.load(Ordering::SeqCst) {
+                let _ = tx.send(TaskUpdate::Cancelled);
+                return;
+            }
+
             let client = LlmClient::new(&endpoint, &model);
-            let result = client.describe_image(&path);
-            let _ = tx.send(result.map_err(|e| e.to_string()));
+            let _ = tx.send(TaskUpdate::Started { total: 1 });
+
+            match client.describe_image(&path) {
+                Ok(description) => {
+                    // Save to database
+                    if let Ok(db) = Database::open(&db_path) {
+                        let _ = db.save_description(&path, &description);
+                    }
+                    let _ = tx.send(TaskUpdate::Completed {
+                        message: format!("Description saved for {}", path.file_name().unwrap_or_default().to_string_lossy()),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: e.to_string(),
+                    });
+                }
+            }
         });
 
-        self.llm_pending_path = Some(entry.path.clone());
-        self.llm_receiver = Some(rx);
-        self.mode = AppMode::LlmProcessing;
         self.status_message = Some(format!("Describing {}...", entry.name));
 
         Ok(())
@@ -873,7 +772,8 @@ impl App {
 
     fn start_batch_llm(&mut self) -> Result<()> {
         // Don't start if already processing
-        if self.mode == AppMode::LlmBatchProcessing {
+        if self.task_manager.is_running(TaskType::LlmBatch) {
+            self.status_message = Some("Batch LLM already running".to_string());
             return Ok(());
         }
 
@@ -886,7 +786,7 @@ impl App {
         }
 
         let total = tasks.len();
-        let (tx, rx) = mpsc::channel();
+        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmBatch);
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
         let db_path = self.config.db_path.clone();
@@ -896,8 +796,8 @@ impl App {
             let db = match Database::open(&db_path) {
                 Ok(db) => db,
                 Err(e) => {
-                    let _ = tx.send(crate::llm::LlmTaskStatus::Error {
-                        message: format!("Failed to open database: {}", e),
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Failed to open database: {}", e),
                     });
                     return;
                 }
@@ -906,63 +806,12 @@ impl App {
             let client = LlmClient::new(&endpoint, &model);
             let mut queue = crate::llm::LlmQueue::new(client);
             queue.add_tasks(tasks);
-            let _ = queue.process_all(&db, Some(tx));
+            queue.process_all_cancellable(&db, tx, cancel_flag);
         });
 
-        self.llm_batch_receiver = Some(rx);
-        self.llm_batch_progress = Some((0, total));
-        self.mode = AppMode::LlmBatchProcessing;
         self.status_message = Some(format!("Processing {} photos...", total));
 
         Ok(())
-    }
-
-    fn update_batch_llm_progress(&mut self) {
-        use crate::llm::LlmTaskStatus;
-
-        let mut should_clear = false;
-
-        if let Some(ref receiver) = self.llm_batch_receiver {
-            while let Ok(status) = receiver.try_recv() {
-                match status {
-                    LlmTaskStatus::Queued { total } => {
-                        self.llm_batch_progress = Some((0, total));
-                        self.status_message = Some(format!("Queued {} photos for processing", total));
-                    }
-                    LlmTaskStatus::Processing { current, total, path } => {
-                        self.llm_batch_progress = Some((current, total));
-                        let filename = std::path::Path::new(&path)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or(path);
-                        self.status_message = Some(format!("[{}/{}] Processing {}", current, total, filename));
-                    }
-                    LlmTaskStatus::Completed { processed, failed } => {
-                        self.llm_batch_progress = None;
-                        self.mode = AppMode::Normal;
-                        if failed > 0 {
-                            self.status_message = Some(format!(
-                                "Batch complete: {} processed, {} failed",
-                                processed, failed
-                            ));
-                        } else {
-                            self.status_message = Some(format!(
-                                "Batch complete: {} photos processed",
-                                processed
-                            ));
-                        }
-                        should_clear = true;
-                    }
-                    LlmTaskStatus::Error { message } => {
-                        self.status_message = Some(format!("Error: {}", message));
-                    }
-                }
-            }
-        }
-
-        if should_clear {
-            self.llm_batch_receiver = None;
-        }
     }
 
     // --- Multi-select and Visual mode methods ---
@@ -1433,13 +1282,31 @@ impl App {
         dialog.searching = true;
         dialog.status = Some("Searching...".to_string());
 
-        // Get embedding for query
         let query = dialog.query.clone();
 
-        // Try to get embedding from LLM client
-        // For now, we'll use a simple text-based search on descriptions
-        // since embedding support depends on the provider
-        let results = self.db.semantic_search_by_text(&query, 20)?;
+        // Try embedding-based search if the provider supports it and we have embeddings
+        let results = if self.llm_client.supports_embeddings() {
+            // Try to get embedding for the query
+            match self.llm_client.get_text_embedding(&query) {
+                Ok(query_embedding) => {
+                    // Use vector similarity search
+                    match self.db.semantic_search(&query_embedding, 20, 0.3) {
+                        Ok(results) if !results.is_empty() => results,
+                        _ => {
+                            // Fallback to text search if no embedding results
+                            self.db.semantic_search_by_text(&query, 20)?
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Fallback to text search if embedding fails
+                    self.db.semantic_search_by_text(&query, 20)?
+                }
+            }
+        } else {
+            // Provider doesn't support embeddings, use text search
+            self.db.semantic_search_by_text(&query, 20)?
+        };
 
         dialog.set_results(results);
         Ok(())
@@ -1449,7 +1316,8 @@ impl App {
 
     fn start_face_scan(&mut self) -> Result<()> {
         // Don't start if already scanning
-        if self.mode == AppMode::FaceScanning {
+        if self.task_manager.is_running(TaskType::FaceDetection) {
+            self.status_message = Some("Face scan already running".to_string());
             return Ok(());
         }
 
@@ -1462,7 +1330,7 @@ impl App {
         }
 
         let total = photos.len();
-        let (tx, rx) = mpsc::channel();
+        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::FaceDetection);
         let db_path = self.config.db_path.clone();
 
         // Spawn face scanning in background thread using dlib
@@ -1470,111 +1338,78 @@ impl App {
             let db = match crate::db::Database::open(&db_path) {
                 Ok(db) => db,
                 Err(e) => {
-                    let _ = tx.send(FaceProcessingStatus::Error {
-                        message: format!("Failed to open database: {}", e),
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Failed to open database: {}", e),
                     });
                     return;
                 }
             };
 
             // Use dlib-based face processor (no LLM needed)
-            let mut processor = FaceProcessor::new();
-            let _ = processor.process_batch(&db, &photos, Some(tx));
+            let mut processor = crate::faces::FaceProcessor::new();
+            processor.process_batch_cancellable(&db, &photos, tx, cancel_flag);
         });
 
-        self.face_scan_receiver = Some(rx);
-        self.face_scan_progress = Some((0, total));
-        self.face_scan_start = Some(std::time::Instant::now());
-        self.mode = AppMode::FaceScanning;
         self.status_message = Some(format!("Scanning {} photos for faces...", total));
 
         Ok(())
     }
 
-    fn update_face_scan_progress(&mut self) {
-        let mut should_clear = false;
+    /// Cluster detected faces by similarity
+    fn cluster_faces(&mut self) -> Result<()> {
+        // Use a default threshold of 0.6 for face similarity
+        let threshold = 0.6;
 
-        // Calculate elapsed time for display
-        let elapsed_str = if let Some(start) = self.face_scan_start {
-            let elapsed = start.elapsed();
-            format!(" ({}s)", elapsed.as_secs())
-        } else {
-            String::new()
-        };
-
-        if let Some(ref receiver) = self.face_scan_receiver {
-            while let Ok(status) = receiver.try_recv() {
-                match status {
-                    FaceProcessingStatus::Starting { total_photos } => {
-                        self.face_scan_progress = Some((0, total_photos));
-                        self.status_message = Some(format!("Starting face scan for {} photos...", total_photos));
-                    }
-                    FaceProcessingStatus::InitializingModels => {
-                        self.status_message = Some("Loading face detection models...".to_string());
-                    }
-                    FaceProcessingStatus::Processing { current, total, path } => {
-                        self.face_scan_progress = Some((current, total));
-                        let filename = std::path::Path::new(&path)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or(path);
-                        self.status_message = Some(format!("[{}/{}] Scanning {}{}", current, total, filename, elapsed_str));
-                    }
-                    FaceProcessingStatus::FoundFaces { path: _, count } => {
-                        // Update status to show face was found
-                        if count > 0 {
-                            if let Some((current, total)) = self.face_scan_progress {
-                                self.status_message = Some(format!("[{}/{}] Found {} face(s){}", current, total, count, elapsed_str));
-                            }
-                        }
-                    }
-                    FaceProcessingStatus::Completed { photos_processed, faces_found } => {
-                        let total_elapsed = if let Some(start) = self.face_scan_start {
-                            format!(" in {}s", start.elapsed().as_secs())
+        match crate::faces::cluster_faces(&self.db, threshold) {
+            Ok(result) => {
+                if result.clusters_created == 0 {
+                    self.status_message = Some("No faces to cluster (run face detection first)".to_string());
+                } else {
+                    self.status_message = Some(format!(
+                        "Created {} clusters from {} faces{}",
+                        result.clusters_created,
+                        result.faces_clustered,
+                        if result.faces_skipped > 0 {
+                            format!(" ({} skipped, no embedding)", result.faces_skipped)
                         } else {
                             String::new()
-                        };
-                        self.face_scan_progress = None;
-                        self.face_scan_start = None;
-                        self.mode = AppMode::Normal;
-                        self.status_message = Some(format!(
-                            "Face scan complete: {} photos, {} faces found{}",
-                            photos_processed, faces_found, total_elapsed
-                        ));
-                        should_clear = true;
-                    }
-                    FaceProcessingStatus::Error { message } => {
-                        self.status_message = Some(format!("Face scan error: {}", message));
-                    }
-                }
-            }
-        }
-
-        // Update elapsed time even if no new messages (to show something is happening)
-        if self.mode == AppMode::FaceScanning && !should_clear {
-            if let Some((current, total)) = self.face_scan_progress {
-                if let Some(start) = self.face_scan_start {
-                    let elapsed = start.elapsed().as_secs();
-                    // Only update every second to avoid excessive updates
-                    let current_msg = self.status_message.as_deref().unwrap_or("");
-                    if !current_msg.contains(&format!("({}s)", elapsed)) {
-                        // Keep the current status but update the time
-                        if let Some(pos) = current_msg.rfind(" (") {
-                            let base_msg = &current_msg[..pos];
-                            self.status_message = Some(format!("{} ({}s)", base_msg, elapsed));
-                        } else if !current_msg.is_empty() {
-                            self.status_message = Some(format!("{} ({}s)", current_msg, elapsed));
-                        } else {
-                            self.status_message = Some(format!("[{}/{}] Processing... ({}s)", current, total, elapsed));
                         }
-                    }
+                    ));
                 }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Clustering error: {}", e));
             }
         }
 
-        if should_clear {
-            self.face_scan_receiver = None;
+        Ok(())
+    }
+
+    // --- Task list dialog methods ---
+
+    fn handle_task_list_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            // Exit task list
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('T') => {
+                self.mode = AppMode::Normal;
+            }
+            // Cancel task by number
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let index = c.to_digit(10).unwrap() as usize - 1;
+                if let Some(task_id) = self.task_manager.get_running_task_by_index(index) {
+                    if self.task_manager.cancel_task(task_id) {
+                        self.status_message = Some("Task cancelled".to_string());
+                    }
+                }
+            }
+            // Cancel all tasks
+            KeyCode::Char('c') => {
+                self.task_manager.cancel_all();
+                self.status_message = Some("All tasks cancelled".to_string());
+            }
+            _ => {}
         }
+        Ok(())
     }
 
     // --- People dialog methods ---

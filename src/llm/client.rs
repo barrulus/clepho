@@ -4,9 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::LlmConfig;
-use super::provider::{create_provider, DetectedFace, FaceDetectionResponse, LlmProvider};
-
-pub use super::provider::{DetectedFace as FaceInfo, FaceDetectionResponse as FaceDetectionResult};
+use super::provider::{create_provider, LlmProvider};
 
 /// LLM client that wraps a provider implementation
 pub struct LlmClient {
@@ -148,14 +146,14 @@ impl LlmClient {
         Ok(tags)
     }
 
-    /// Detect faces in an image using the configured provider
-    pub fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
-        self.provider.detect_faces(image_path)
+    /// Get text embedding for semantic search
+    pub fn get_text_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        self.provider.get_text_embedding(text)
     }
 
-    /// Check if the provider supports face detection
-    pub fn supports_face_detection(&self) -> bool {
-        self.provider.supports_face_detection()
+    /// Check if the provider supports embeddings
+    pub fn supports_embeddings(&self) -> bool {
+        self.provider.supports_embeddings()
     }
 
     #[allow(dead_code)]

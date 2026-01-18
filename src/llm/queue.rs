@@ -1,23 +1,18 @@
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use super::client::LlmClient;
 use crate::db::Database;
+use crate::tasks::{TaskUpdate, TaskProgress};
 
 #[derive(Debug, Clone)]
 pub struct LlmTask {
     pub photo_id: i64,
     pub photo_path: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub enum LlmTaskStatus {
-    Queued { total: usize },
-    Processing { current: usize, total: usize, path: String },
-    Completed { processed: usize, failed: usize },
-    Error { message: String },
 }
 
 pub struct LlmQueue {
@@ -54,46 +49,53 @@ impl LlmQueue {
         self.tasks.is_empty()
     }
 
-    pub fn process_all(
+    /// Process all tasks with cancellation support via TaskUpdate protocol.
+    pub fn process_all_cancellable(
         &mut self,
         db: &Database,
-        progress_tx: Option<mpsc::Sender<LlmTaskStatus>>,
-    ) -> Result<(usize, usize)> {
+        tx: mpsc::Sender<TaskUpdate>,
+        cancel_flag: Arc<AtomicBool>,
+    ) {
         let total = self.tasks.len();
         let mut processed = 0;
         let mut failed = 0;
 
-        if let Some(ref tx) = progress_tx {
-            let _ = tx.send(LlmTaskStatus::Queued { total });
-        }
+        let _ = tx.send(TaskUpdate::Started { total });
 
         while let Some(task) = self.tasks.pop_front() {
-            if let Some(ref tx) = progress_tx {
-                let _ = tx.send(LlmTaskStatus::Processing {
-                    current: processed + 1,
-                    total,
-                    path: task.photo_path.to_string_lossy().to_string(),
-                });
+            // Check for cancellation
+            if cancel_flag.load(Ordering::SeqCst) {
+                let _ = tx.send(TaskUpdate::Cancelled);
+                return;
             }
+
+            let filename = task.photo_path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| task.photo_path.to_string_lossy().to_string());
+
+            let _ = tx.send(TaskUpdate::Progress(
+                TaskProgress::new(processed + 1, total).with_item(&filename)
+            ));
 
             match self.process_task(&task, db) {
                 Ok(_) => processed += 1,
                 Err(e) => {
                     failed += 1;
-                    if let Some(ref tx) = progress_tx {
-                        let _ = tx.send(LlmTaskStatus::Error {
-                            message: format!("Error processing {}: {}", task.photo_path.display(), e),
-                        });
-                    }
+                    // Continue processing other tasks despite errors
+                    eprintln!("Error processing {}: {}", task.photo_path.display(), e);
                 }
             }
         }
 
-        if let Some(ref tx) = progress_tx {
-            let _ = tx.send(LlmTaskStatus::Completed { processed, failed });
+        if failed > 0 {
+            let _ = tx.send(TaskUpdate::Completed {
+                message: format!("{} processed, {} failed", processed, failed),
+            });
+        } else {
+            let _ = tx.send(TaskUpdate::Completed {
+                message: format!("{} photos processed", processed),
+            });
         }
-
-        Ok((processed, failed))
     }
 
     fn process_task(&self, task: &LlmTask, db: &Database) -> Result<()> {
@@ -113,6 +115,15 @@ impl LlmQueue {
             "#,
             rusqlite::params![description, tags_json, task.photo_id],
         )?;
+
+        // Generate and store embedding for semantic search (if provider supports it)
+        if self.client.supports_embeddings() {
+            // Use the description for the embedding
+            if let Ok(embedding) = self.client.get_text_embedding(&description) {
+                // Store with the model name for tracking
+                let _ = db.store_embedding(task.photo_id, &embedding, "text-embedding");
+            }
+        }
 
         Ok(())
     }

@@ -11,7 +11,6 @@ use crate::db::{BoundingBox, FaceWithPhoto, Person};
 #[derive(Clone)]
 pub struct FaceEntry {
     pub face_id: i64,
-    pub photo_id: i64,
     pub photo_filename: String,
     pub photo_path: String,
     pub bbox: BoundingBox,
@@ -21,7 +20,6 @@ impl From<FaceWithPhoto> for FaceEntry {
     fn from(f: FaceWithPhoto) -> Self {
         Self {
             face_id: f.face.id,
-            photo_id: f.face.photo_id,
             photo_filename: f.photo_filename,
             photo_path: f.photo_path,
             bbox: f.face.bbox,
@@ -211,7 +209,7 @@ impl PeopleDialog {
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Extract all needed data from dialog first to avoid borrow conflicts
-    let (view_mode, input_mode, people_len, faces_len, name_input, cursor, status, selected_index) = {
+    let (view_mode, input_mode, people_len, faces_len, name_input, cursor, status, _selected_index) = {
         let dialog = match app.people_dialog.as_ref() {
             Some(d) => d,
             None => return,
@@ -380,58 +378,6 @@ fn render_people_list(frame: &mut Frame, dialog: &PeopleDialog, area: Rect) {
 
     let mut state = ListState::default();
     if !dialog.people.is_empty() {
-        state.select(Some(dialog.selected_index));
-    }
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn render_faces_list(frame: &mut Frame, dialog: &PeopleDialog, area: Rect) {
-    if dialog.faces.is_empty() {
-        let empty = Paragraph::new("No unassigned faces.\nRun face detection first (F key in browser).")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Unassigned Faces ")
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            );
-        frame.render_widget(empty, area);
-        return;
-    }
-
-    let items: Vec<ListItem> = dialog
-        .faces
-        .iter()
-        .map(|face| {
-            ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(&face.photo_filename, Style::default().fg(Color::Yellow)),
-                ]),
-                Line::from(Span::styled(
-                    format!("  Face #{}", face.face_id),
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ])
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Unassigned Faces ")
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
-        .highlight_style(
-            Style::default()
-                .bg(Color::Yellow)
-                .fg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    let mut state = ListState::default();
-    if !dialog.faces.is_empty() {
         state.select(Some(dialog.selected_index));
     }
     frame.render_stateful_widget(list, area, &mut state);

@@ -122,7 +122,7 @@ pub fn merge_clusters(
     let person_id = db.cluster_to_person(cluster_ids[0], name)?;
 
     // Merge remaining clusters into this person
-    for &cluster_id in &cluster_ids[1..] {
+    for &_cluster_id in &cluster_ids[1..] {
         // Get all faces in this cluster and assign to person
         let faces = db.get_unassigned_faces()?;
         for face in faces {

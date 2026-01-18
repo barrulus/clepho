@@ -8,6 +8,7 @@ pub mod preview;
 pub mod rename_dialog;
 pub mod search_dialog;
 mod status_bar;
+mod task_list_dialog;
 
 use ratatui::prelude::*;
 
@@ -89,5 +90,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         if app.people_dialog.is_some() {
             people_dialog::render(frame, app, area);
         }
+    }
+
+    // Render task list dialog if in task list mode
+    if app.mode == AppMode::TaskList {
+        task_list_dialog::render(frame, app);
     }
 }

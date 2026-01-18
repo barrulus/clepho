@@ -3,16 +3,10 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::app::{App, AppMode, ScanProgress};
+use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    // If scanning, show scan progress
-    if app.mode == AppMode::Scanning {
-        render_scan_progress(frame, app, area);
-        return;
-    }
-
-    // If there's a status message, show it
+    // If there's a status message, show it prominently
     if let Some(ref message) = app.status_message {
         let line = Line::from(vec![
             Span::styled(
@@ -25,7 +19,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Normal status bar
+    // Build status bar content
     let path = app.current_dir.to_string_lossy();
 
     let item_count = app.entries.len();
@@ -38,78 +32,69 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         "0/0".to_string()
     };
 
-    let left_text = Span::styled(
+    // Build running task indicators
+    let running_tasks = app.task_manager.running_tasks();
+    let task_indicators: String = if running_tasks.is_empty() {
+        String::new()
+    } else {
+        let indicators: Vec<String> = running_tasks
+            .iter()
+            .map(|task| {
+                if let Some(ref progress) = task.progress {
+                    format!("[{}:{}%]", task.task_type.short_name(), progress.percent())
+                } else {
+                    format!("[{}:...]", task.task_type.short_name())
+                }
+            })
+            .collect();
+        indicators.join(" ")
+    };
+
+    // Build the status bar line
+    let mut spans = Vec::new();
+
+    // Left: path
+    spans.push(Span::styled(
         format!(" {} ", path),
         Style::default().fg(Color::White).bg(Color::DarkGray),
-    );
+    ));
 
-    let middle_text = Span::styled(
+    // Middle: dir/file count
+    spans.push(Span::styled(
         format!(" {} dirs, {} files ", dir_count, file_count),
         Style::default().fg(Color::Gray),
-    );
+    ));
 
-    let right_text = Span::styled(
-        format!(" {} | s scan | ? help | q quit ", position),
-        Style::default().fg(Color::White).bg(Color::DarkGray),
-    );
+    // Task indicators (if any)
+    if !task_indicators.is_empty() {
+        spans.push(Span::styled(
+            format!(" {} ", task_indicators),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
 
-    // Calculate spacing
-    let left_width = path.len() + 2;
-    let middle_width = format!(" {} dirs, {} files ", dir_count, file_count).len();
-    let right_width = format!(" {} | s scan | ? help | q quit ", position).len();
-    let total_used = left_width + middle_width + right_width;
-    let available = area.width as usize;
-
-    let spacing = if available > total_used {
-        " ".repeat((available - total_used) / 2)
+    // Calculate remaining space and add spacing
+    let content_len: usize = spans.iter().map(|s| s.content.len()).sum();
+    let help_text = if running_tasks.is_empty() {
+        format!(" {} | s:scan ?:help q:quit ", position)
     } else {
-        String::new()
+        format!(" {} | T:tasks ?:help q:quit ", position)
     };
+    let help_len = help_text.len();
 
-    let line = Line::from(vec![
-        left_text,
-        Span::raw(&spacing),
-        middle_text,
-        Span::raw(&spacing),
-        right_text,
-    ]);
+    let available = area.width as usize;
+    if available > content_len + help_len {
+        let spacing = " ".repeat(available - content_len - help_len);
+        spans.push(Span::raw(spacing));
+    }
 
-    let paragraph = Paragraph::new(line);
-    frame.render_widget(paragraph, area);
-}
+    // Right: help hints
+    spans.push(Span::styled(
+        help_text,
+        Style::default().fg(Color::White).bg(Color::DarkGray),
+    ));
 
-fn render_scan_progress(frame: &mut Frame, app: &App, area: Rect) {
-    let progress_text = match &app.scan_progress {
-        Some(ScanProgress::Started { total_files }) => {
-            format!("Starting scan... {} files found", total_files)
-        }
-        Some(ScanProgress::Scanning { current, total, path }) => {
-            let filename = std::path::Path::new(path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.clone());
-            format!("Scanning {}/{}: {}", current, total, filename)
-        }
-        Some(ScanProgress::Completed { scanned, new, updated }) => {
-            format!("Complete: {} scanned, {} new, {} updated", scanned, new, updated)
-        }
-        Some(ScanProgress::Error { message }) => {
-            format!("Error: {}", message)
-        }
-        None => "Scanning...".to_string(),
-    };
-
-    let line = Line::from(vec![
-        Span::styled(
-            format!(" {} ", progress_text),
-            Style::default().fg(Color::Cyan).bg(Color::DarkGray),
-        ),
-        Span::styled(
-            " [ESC to cancel] ",
-            Style::default().fg(Color::Yellow).bg(Color::DarkGray),
-        ),
-    ]);
-
+    let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
 }

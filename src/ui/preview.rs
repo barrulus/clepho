@@ -46,8 +46,6 @@ pub struct ImagePreviewState {
     current_path: Option<PathBuf>,
     /// Scroll offset for preview text (metadata + description)
     pub scroll_offset: u16,
-    /// Total content height (for scroll bounds)
-    content_height: u16,
     /// Thumbnail size for image loading
     thumbnail_size: u32,
     /// Cache of face crops keyed by "path#face_id"
@@ -78,18 +76,12 @@ impl ImagePreviewState {
             metadata_sender: meta_tx,
             current_path: None,
             scroll_offset: 0,
-            content_height: 0,
             thumbnail_size: 1024,
             face_cache: HashMap::new(),
             loading_faces: HashSet::new(),
             face_receiver: Some(face_rx),
             face_sender: face_tx,
         }
-    }
-
-    /// Set thumbnail size
-    pub fn set_thumbnail_size(&mut self, size: u32) {
-        self.thumbnail_size = size;
     }
 
     /// Scroll the preview down
@@ -105,11 +97,6 @@ impl ImagePreviewState {
     /// Reset scroll when selection changes
     pub fn reset_scroll(&mut self) {
         self.scroll_offset = 0;
-    }
-
-    /// Set content height for scroll bounds
-    pub fn set_content_height(&mut self, height: u16) {
-        self.content_height = height;
     }
 
     /// Check for completed async loads (images, metadata, and face crops)
@@ -348,11 +335,6 @@ impl ImagePreviewState {
     /// Check if a face crop is currently loading
     pub fn is_loading_face(&self, cache_key: &PathBuf) -> bool {
         self.loading_faces.contains(cache_key)
-    }
-
-    /// Clear the image cache
-    pub fn clear_cache(&mut self) {
-        self.image_cache.clear();
     }
 
     /// Check if image preview is available

@@ -1,36 +1,12 @@
 use anyhow::Result;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use crate::db::Database;
+use crate::tasks::{TaskUpdate, TaskProgress};
 use super::detector;
-
-/// Status updates during face processing
-#[derive(Debug, Clone)]
-pub enum FaceProcessingStatus {
-    /// Starting face detection
-    Starting { total_photos: usize },
-    /// Initializing face detection models
-    InitializingModels,
-    /// Processing a specific photo
-    Processing {
-        current: usize,
-        total: usize,
-        path: String,
-    },
-    /// Found faces in a photo
-    FoundFaces {
-        path: String,
-        count: usize,
-    },
-    /// Completed processing
-    Completed {
-        photos_processed: usize,
-        faces_found: usize,
-    },
-    /// Error occurred
-    Error { message: String },
-}
 
 /// Face processor that detects and stores faces using dlib
 pub struct FaceProcessor {
@@ -72,38 +48,49 @@ impl FaceProcessor {
         Ok(faces_added)
     }
 
-    /// Process multiple photos in batch
-    pub fn process_batch(
+    /// Process multiple photos in batch with cancellation support via TaskUpdate protocol.
+    pub fn process_batch_cancellable(
         &mut self,
         db: &Database,
         photos: &[(i64, String)],
-        status_sender: Option<mpsc::Sender<FaceProcessingStatus>>,
-    ) -> Result<(usize, usize)> {
+        tx: mpsc::Sender<TaskUpdate>,
+        cancel_flag: Arc<AtomicBool>,
+    ) {
         let total = photos.len();
 
-        if let Some(ref tx) = status_sender {
-            let _ = tx.send(FaceProcessingStatus::Starting { total_photos: total });
-        }
+        let _ = tx.send(TaskUpdate::Started { total });
 
         // Initialize models if not already done
         if !self._initialized {
-            if let Some(ref tx) = status_sender {
-                let _ = tx.send(FaceProcessingStatus::InitializingModels);
+            let _ = tx.send(TaskUpdate::Progress(
+                TaskProgress::new(0, total).with_message("Loading face detection models...")
+            ));
+            if let Err(e) = self.init_models() {
+                let _ = tx.send(TaskUpdate::Failed {
+                    error: format!("Failed to initialize face models: {}", e),
+                });
+                return;
             }
-            self.init_models()?;
         }
 
         let mut total_faces = 0;
         let mut photos_processed = 0;
 
         for (idx, (photo_id, path)) in photos.iter().enumerate() {
-            if let Some(ref tx) = status_sender {
-                let _ = tx.send(FaceProcessingStatus::Processing {
-                    current: idx + 1,
-                    total,
-                    path: path.clone(),
-                });
+            // Check for cancellation
+            if cancel_flag.load(Ordering::SeqCst) {
+                let _ = tx.send(TaskUpdate::Cancelled);
+                return;
             }
+
+            let filename = Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone());
+
+            let _ = tx.send(TaskUpdate::Progress(
+                TaskProgress::new(idx + 1, total).with_item(&filename)
+            ));
 
             let image_path = Path::new(path);
             if !image_path.exists() {
@@ -114,37 +101,19 @@ impl FaceProcessor {
                 Ok(count) => {
                     // Mark photo as scanned (even if 0 faces found)
                     let _ = db.mark_photo_scanned(*photo_id, count);
-
                     total_faces += count;
                     photos_processed += 1;
-
-                    if count > 0 {
-                        if let Some(ref tx) = status_sender {
-                            let _ = tx.send(FaceProcessingStatus::FoundFaces {
-                                path: path.clone(),
-                                count,
-                            });
-                        }
-                    }
                 }
                 Err(e) => {
-                    if let Some(ref tx) = status_sender {
-                        let _ = tx.send(FaceProcessingStatus::Error {
-                            message: format!("Error processing {}: {}", path, e),
-                        });
-                    }
+                    // Log error but continue processing
+                    eprintln!("Error processing {}: {}", path, e);
                 }
             }
         }
 
-        if let Some(ref tx) = status_sender {
-            let _ = tx.send(FaceProcessingStatus::Completed {
-                photos_processed,
-                faces_found: total_faces,
-            });
-        }
-
-        Ok((photos_processed, total_faces))
+        let _ = tx.send(TaskUpdate::Completed {
+            message: format!("{} photos, {} faces found", photos_processed, total_faces),
+        });
     }
 }
 

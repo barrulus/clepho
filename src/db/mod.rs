@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 pub use schema::SCHEMA;
 pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
-pub use embeddings::{EmbeddingRecord, SearchResult, cosine_similarity};
-pub use faces::{BoundingBox, Face, FaceCluster, FaceWithPhoto, Person};
+pub use embeddings::SearchResult;
+pub use faces::{BoundingBox, FaceWithPhoto, Person};
 
 pub struct Database {
     pub conn: Connection,

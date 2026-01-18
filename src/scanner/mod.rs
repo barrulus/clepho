@@ -4,10 +4,13 @@ pub mod metadata;
 
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::db::Database;
+use crate::tasks::{TaskUpdate, TaskProgress};
 
 pub use discovery::discover_images;
 pub use hashing::HashResult;
@@ -23,14 +26,6 @@ pub struct ScannedPhoto {
     pub hashes: Option<HashResult>,
 }
 
-#[derive(Debug, Clone)]
-pub enum ScanProgress {
-    Started { total_files: usize },
-    Scanning { current: usize, total: usize, path: String },
-    Completed { scanned: usize, new: usize, updated: usize },
-    Error { message: String },
-}
-
 pub struct Scanner {
     config: Config,
 }
@@ -40,71 +35,83 @@ impl Scanner {
         Self { config }
     }
 
-    pub fn scan_directory(
+    /// Scan directory with cancellation support via TaskUpdate protocol.
+    pub fn scan_directory_cancellable(
         &self,
         directory: &PathBuf,
         db: &Database,
-        progress_tx: Option<mpsc::Sender<ScanProgress>>,
-    ) -> Result<ScanResult> {
+        tx: mpsc::Sender<TaskUpdate>,
+        cancel_flag: Arc<AtomicBool>,
+    ) {
         // Discover all image files
-        let image_paths = discover_images(directory, &self.config.scanner.image_extensions)?;
+        let image_paths = match discover_images(directory, &self.config.scanner.image_extensions) {
+            Ok(paths) => paths,
+            Err(e) => {
+                let _ = tx.send(TaskUpdate::Failed {
+                    error: format!("Failed to discover images: {}", e),
+                });
+                return;
+            }
+        };
 
         let total = image_paths.len();
-        if let Some(ref tx) = progress_tx {
-            let _ = tx.send(ScanProgress::Started { total_files: total });
-        }
+        let _ = tx.send(TaskUpdate::Started { total });
 
         let mut scanned = 0;
         let mut new_count = 0;
         let mut updated_count = 0;
 
         for (index, path) in image_paths.iter().enumerate() {
-            if let Some(ref tx) = progress_tx {
-                let _ = tx.send(ScanProgress::Scanning {
-                    current: index + 1,
-                    total,
-                    path: path.to_string_lossy().to_string(),
-                });
+            // Check for cancellation
+            if cancel_flag.load(Ordering::SeqCst) {
+                let _ = tx.send(TaskUpdate::Cancelled);
+                return;
             }
+
+            let path_str = path.to_string_lossy().to_string();
+            let filename = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path_str.clone());
+
+            let _ = tx.send(TaskUpdate::Progress(
+                TaskProgress::new(index + 1, total).with_item(&filename)
+            ));
 
             match self.scan_single_file(path) {
                 Ok(photo) => {
                     // Check if photo already exists in database
-                    let exists = self.photo_exists(db, path)?;
-
-                    if exists {
-                        self.update_photo(db, &photo)?;
-                        updated_count += 1;
-                    } else {
-                        self.insert_photo(db, &photo)?;
-                        new_count += 1;
+                    match self.photo_exists(db, path) {
+                        Ok(exists) => {
+                            if exists {
+                                if let Err(e) = self.update_photo(db, &photo) {
+                                    // Log error but continue
+                                    eprintln!("Error updating {}: {}", path.display(), e);
+                                } else {
+                                    updated_count += 1;
+                                }
+                            } else {
+                                if let Err(e) = self.insert_photo(db, &photo) {
+                                    eprintln!("Error inserting {}: {}", path.display(), e);
+                                } else {
+                                    new_count += 1;
+                                }
+                            }
+                            scanned += 1;
+                        }
+                        Err(e) => {
+                            eprintln!("Error checking existence of {}: {}", path.display(), e);
+                        }
                     }
-                    scanned += 1;
                 }
                 Err(e) => {
-                    if let Some(ref tx) = progress_tx {
-                        let _ = tx.send(ScanProgress::Error {
-                            message: format!("Error scanning {}: {}", path.display(), e),
-                        });
-                    }
+                    eprintln!("Error scanning {}: {}", path.display(), e);
                 }
             }
         }
 
-        if let Some(ref tx) = progress_tx {
-            let _ = tx.send(ScanProgress::Completed {
-                scanned,
-                new: new_count,
-                updated: updated_count,
-            });
-        }
-
-        Ok(ScanResult {
-            total_found: total,
-            scanned,
-            new: new_count,
-            updated: updated_count,
-        })
+        let _ = tx.send(TaskUpdate::Completed {
+            message: format!("{} scanned, {} new, {} updated", scanned, new_count, updated_count),
+        });
     }
 
     fn scan_single_file(&self, path: &PathBuf) -> Result<ScannedPhoto> {
