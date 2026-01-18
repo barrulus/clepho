@@ -1,11 +1,14 @@
 mod browser;
+pub mod changes_dialog;
 mod dialogs;
 pub mod duplicates;
 pub mod export_dialog;
 pub mod move_dialog;
+pub mod overdue_dialog;
 pub mod people_dialog;
 pub mod preview;
 pub mod rename_dialog;
+pub mod schedule_dialog;
 pub mod search_dialog;
 mod status_bar;
 mod task_list_dialog;
@@ -102,6 +105,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.mode == AppMode::TrashViewing {
         if let Some(ref dialog) = app.trash_dialog {
             trash_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render changes dialog if in changes viewing mode
+    if app.mode == AppMode::ChangesViewing {
+        if let Some(ref dialog) = app.changes_dialog {
+            changes_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render schedule dialog if in scheduling mode
+    if app.mode == AppMode::Scheduling {
+        if let Some(ref dialog) = app.schedule_dialog {
+            schedule_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render overdue dialog if in overdue dialog mode
+    if app.mode == AppMode::OverdueDialog {
+        if let Some(ref dialog) = app.overdue_dialog {
+            overdue_dialog::render(frame, dialog, area);
         }
     }
 }

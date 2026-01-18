@@ -1,3 +1,4 @@
+pub mod change_detection;
 pub mod discovery;
 pub mod hashing;
 pub mod metadata;
@@ -14,6 +15,7 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::tasks::{TaskUpdate, TaskProgress};
 
+pub use change_detection::{detect_changes, ChangeDetectionResult};
 pub use discovery::discover_images;
 pub use hashing::HashResult;
 pub use metadata::ImageMetadata;
@@ -25,6 +27,7 @@ pub struct ScannedPhoto {
     pub filename: String,
     pub directory: String,
     pub size_bytes: u64,
+    pub modified_at: Option<String>,
     pub metadata: Option<ImageMetadata>,
     pub hashes: Option<HashResult>,
 }
@@ -161,6 +164,15 @@ impl Scanner {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
 
+        // Get file modification time as ISO timestamp
+        let modified_at = file_metadata
+            .modified()
+            .ok()
+            .and_then(|t| {
+                let datetime: chrono::DateTime<chrono::Utc> = t.into();
+                Some(datetime.format("%Y-%m-%dT%H:%M:%S").to_string())
+            });
+
         // Extract image metadata (EXIF, dimensions)
         let metadata = metadata::extract_metadata(path).ok();
 
@@ -175,6 +187,7 @@ impl Scanner {
             filename,
             directory,
             size_bytes: file_metadata.len(),
+            modified_at,
             metadata,
             hashes,
         })
@@ -228,18 +241,19 @@ impl Scanner {
         db.conn().execute(
             r#"
             INSERT INTO photos (
-                path, filename, directory, size_bytes,
+                path, filename, directory, size_bytes, modified_at,
                 width, height, format,
                 camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at,
                 gps_latitude, gps_longitude, all_exif,
                 md5_hash, sha256_hash, perceptual_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             rusqlite::params![
                 path_str.as_ref(),
                 photo.filename,
                 photo.directory,
                 photo.size_bytes as i64,
+                photo.modified_at,
                 width,
                 height,
                 format,
@@ -301,7 +315,7 @@ impl Scanner {
         db.conn().execute(
             r#"
             UPDATE photos SET
-                filename = ?, directory = ?, size_bytes = ?,
+                filename = ?, directory = ?, size_bytes = ?, modified_at = ?,
                 width = ?, height = ?, format = ?,
                 camera_make = ?, camera_model = ?, lens = ?, focal_length = ?, aperture = ?, shutter_speed = ?, iso = ?, taken_at = ?,
                 gps_latitude = ?, gps_longitude = ?, all_exif = ?,
@@ -313,6 +327,7 @@ impl Scanner {
                 photo.filename,
                 photo.directory,
                 photo.size_bytes as i64,
+                photo.modified_at,
                 width,
                 height,
                 format,

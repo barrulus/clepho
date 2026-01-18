@@ -5,6 +5,7 @@ mod export;
 mod faces;
 mod llm;
 mod scanner;
+mod schedule;
 mod tasks;
 mod trash;
 mod ui;

@@ -1,6 +1,7 @@
 mod schema;
 pub mod embeddings;
 pub mod faces;
+pub mod schedule;
 pub mod similarity;
 pub mod trash;
 
@@ -12,6 +13,7 @@ pub use schema::SCHEMA;
 pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
 pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, FaceWithPhoto, Person};
+pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
 
 pub struct Database {
     pub conn: Connection,
@@ -78,6 +80,26 @@ impl Database {
         )?;
 
         Ok(())
+    }
+
+    /// Get photos with their modified_at timestamps for a specific directory.
+    /// Used for change detection.
+    pub fn get_photos_mtime_in_dir(&self, directory: &str) -> Result<Vec<(String, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, modified_at FROM photos WHERE directory = ?",
+        )?;
+
+        let results = stmt
+            .query_map([directory], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(results)
     }
 
     /// Simple text-based search on descriptions (fallback when no embeddings)

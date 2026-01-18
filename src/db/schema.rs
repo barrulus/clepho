@@ -174,4 +174,23 @@ CREATE TABLE IF NOT EXISTS face_scans (
     faces_found INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
 );
+
+-- Scheduled tasks for automated processing
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_type TEXT NOT NULL,           -- 'Scan', 'LlmBatch', 'FaceDetection'
+    target_path TEXT NOT NULL,         -- Directory or file path
+    photo_ids TEXT,                    -- JSON array of photo IDs for batch operations
+    scheduled_at TEXT NOT NULL,        -- ISO timestamp when task should run
+    hours_start INTEGER,               -- Optional hour of day to start (0-23)
+    hours_end INTEGER,                 -- Optional hour of day to end (0-23)
+    status TEXT DEFAULT 'pending',     -- pending/running/completed/cancelled/failed
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    completed_at TEXT,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_scheduled_at ON scheduled_tasks(scheduled_at);
 "#;

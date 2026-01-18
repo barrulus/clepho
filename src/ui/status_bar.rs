@@ -73,10 +73,26 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
+    // Changes indicator (if any)
+    if let Some(ref changes) = app.detected_changes {
+        let change_count = changes.total_count();
+        if change_count > 0 {
+            spans.push(Span::styled(
+                format!(" [!{} changes] ", change_count),
+                Style::default().fg(Color::Red),
+            ));
+        }
+    }
+
     // Calculate remaining space and add spacing
     let content_len: usize = spans.iter().map(|s| s.content.len()).sum();
+    let has_changes = app.detected_changes.as_ref().map_or(false, |c| c.has_changes());
     let help_text = if running_tasks.is_empty() {
-        format!(" {} | s:scan ?:help q:quit ", position)
+        if has_changes {
+            format!(" {} | s:scan c:changes ?:help q:quit ", position)
+        } else {
+            format!(" {} | s:scan ?:help q:quit ", position)
+        }
     } else {
         format!(" {} | T:tasks ?:help q:quit ", position)
     };

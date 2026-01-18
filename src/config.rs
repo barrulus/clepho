@@ -21,6 +21,9 @@ pub struct Config {
 
     #[serde(default)]
     pub thumbnails: ThumbnailConfig,
+
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +86,35 @@ impl Default for ThumbnailConfig {
         Self {
             path: default_thumb_cache_path(),
             size: default_thumb_cache_size(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleConfig {
+    /// Whether to check for overdue schedules on startup.
+    #[serde(default = "default_check_overdue_on_startup")]
+    pub check_overdue_on_startup: bool,
+
+    /// Default start hour for hours of operation (0-23).
+    #[serde(default)]
+    pub default_hours_start: Option<u8>,
+
+    /// Default end hour for hours of operation (0-23).
+    #[serde(default)]
+    pub default_hours_end: Option<u8>,
+}
+
+fn default_check_overdue_on_startup() -> bool {
+    true
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self {
+            check_overdue_on_startup: default_check_overdue_on_startup(),
+            default_hours_start: None,
+            default_hours_end: None,
         }
     }
 }
@@ -223,6 +255,7 @@ impl Default for Config {
             preview: PreviewConfig::default(),
             trash: TrashConfig::default(),
             thumbnails: ThumbnailConfig::default(),
+            schedule: ScheduleConfig::default(),
         }
     }
 }
