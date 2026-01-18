@@ -15,6 +15,49 @@ pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, FaceWithPhoto, Person};
 pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
 
+/// Full metadata for a photo from the database
+#[derive(Debug, Clone, Default)]
+pub struct PhotoMetadata {
+    pub id: i64,
+    pub path: String,
+    pub filename: String,
+    pub directory: String,
+    pub size_bytes: i64,
+
+    // Image dimensions
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub format: Option<String>,
+
+    // EXIF data
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub focal_length: Option<f64>,
+    pub aperture: Option<f64>,
+    pub shutter_speed: Option<String>,
+    pub iso: Option<i64>,
+    pub taken_at: Option<String>,
+    pub gps_latitude: Option<f64>,
+    pub gps_longitude: Option<f64>,
+
+    // Timestamps
+    pub modified_at: Option<String>,
+    pub scanned_at: Option<String>,
+
+    // LLM-generated content
+    pub description: Option<String>,
+    pub tags: Option<String>,
+
+    // Hashes
+    pub sha256_hash: Option<String>,
+    pub perceptual_hash: Option<String>,
+
+    // Face and people counts (computed)
+    pub face_count: i64,
+    pub people_names: Vec<String>,
+}
+
 pub struct Database {
     pub conn: Connection,
 }
@@ -100,6 +143,96 @@ impl Database {
             .collect();
 
         Ok(results)
+    }
+
+    /// Get full photo metadata by path.
+    /// Returns all stored data including EXIF, dimensions, description, and face/people info.
+    pub fn get_photo_metadata(&self, path: &std::path::Path) -> Result<Option<PhotoMetadata>> {
+        let path_str = path.to_string_lossy();
+
+        // First get the basic photo data
+        let result = self.conn.query_row(
+            r#"
+            SELECT id, path, filename, directory, size_bytes,
+                   width, height, format,
+                   camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at,
+                   gps_latitude, gps_longitude,
+                   modified_at, scanned_at,
+                   description, tags,
+                   sha256_hash, perceptual_hash
+            FROM photos
+            WHERE path = ?
+            "#,
+            [path_str.as_ref()],
+            |row| {
+                Ok(PhotoMetadata {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    filename: row.get(2)?,
+                    directory: row.get(3)?,
+                    size_bytes: row.get(4)?,
+                    width: row.get(5)?,
+                    height: row.get(6)?,
+                    format: row.get(7)?,
+                    camera_make: row.get(8)?,
+                    camera_model: row.get(9)?,
+                    lens: row.get(10)?,
+                    focal_length: row.get(11)?,
+                    aperture: row.get(12)?,
+                    shutter_speed: row.get(13)?,
+                    iso: row.get(14)?,
+                    taken_at: row.get(15)?,
+                    gps_latitude: row.get(16)?,
+                    gps_longitude: row.get(17)?,
+                    modified_at: row.get(18)?,
+                    scanned_at: row.get(19)?,
+                    description: row.get(20)?,
+                    tags: row.get(21)?,
+                    sha256_hash: row.get(22)?,
+                    perceptual_hash: row.get(23)?,
+                    face_count: 0,
+                    people_names: Vec::new(),
+                })
+            },
+        );
+
+        match result {
+            Ok(mut metadata) => {
+                // Get face count and people names for this photo
+                let face_info = self.conn.query_row(
+                    r#"
+                    SELECT COUNT(f.id)
+                    FROM faces f
+                    WHERE f.photo_id = ?
+                    "#,
+                    [metadata.id],
+                    |row| row.get::<_, i64>(0),
+                );
+                if let Ok(count) = face_info {
+                    metadata.face_count = count;
+                }
+
+                // Get unique people names in this photo
+                let mut stmt = self.conn.prepare(
+                    r#"
+                    SELECT DISTINCT p.name
+                    FROM faces f
+                    JOIN people p ON f.person_id = p.id
+                    WHERE f.photo_id = ?
+                    ORDER BY p.name
+                    "#,
+                )?;
+                let names: Vec<String> = stmt
+                    .query_map([metadata.id], |row| row.get(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                metadata.people_names = names;
+
+                Ok(Some(metadata))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Simple text-based search on descriptions (fallback when no embeddings)

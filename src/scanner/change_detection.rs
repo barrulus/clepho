@@ -4,10 +4,16 @@
 //! the database records.
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::db::Database;
+
+/// Tolerance in seconds for timestamp comparison.
+/// This accounts for filesystem timestamp granularity (some filesystems
+/// only have 1-2 second precision) and potential rounding during storage.
+const TIMESTAMP_TOLERANCE_SECS: i64 = 2;
 
 /// Result of detecting changes in a directory.
 #[derive(Debug, Clone, Default)]
@@ -78,14 +84,19 @@ pub fn detect_changes(
             // File exists in database, check if modified
             if let Ok(metadata) = std::fs::metadata(&path) {
                 if let Ok(fs_mtime) = metadata.modified() {
-                    let fs_mtime_str = {
-                        let datetime: chrono::DateTime<chrono::Utc> = fs_mtime.into();
-                        datetime.format("%Y-%m-%dT%H:%M:%S").to_string()
-                    };
+                    let fs_datetime: DateTime<Utc> = fs_mtime.into();
 
-                    // Compare filesystem mtime with database mtime
+                    // Compare filesystem mtime with database mtime using tolerance
                     if let Some(ref db_mtime_str) = db_mtime {
-                        if fs_mtime_str > *db_mtime_str {
+                        // Parse the database timestamp
+                        if let Ok(db_datetime) = parse_db_timestamp(db_mtime_str) {
+                            // Check if filesystem time is significantly newer than DB time
+                            let diff = fs_datetime.timestamp() - db_datetime.timestamp();
+                            if diff > TIMESTAMP_TOLERANCE_SECS {
+                                result.modified_files.push(path);
+                            }
+                        } else {
+                            // Can't parse DB timestamp, consider it modified
                             result.modified_files.push(path);
                         }
                     } else {
@@ -105,6 +116,14 @@ pub fn detect_changes(
     result.modified_files.sort();
 
     Ok(result)
+}
+
+/// Parse a database timestamp string into a DateTime.
+/// Handles the ISO 8601 format used by the scanner: "YYYY-MM-DDTHH:MM:SS"
+fn parse_db_timestamp(timestamp: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
+    // Try parsing with the format we store (no timezone suffix)
+    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S")
+        .map(|dt| dt.and_utc())
 }
 
 #[cfg(test)]

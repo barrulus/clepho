@@ -252,6 +252,11 @@ impl App {
                 let prefix = completion.task_type.display_name();
                 if completion.success {
                     self.status_message = Some(format!("{}: {}", prefix, completion.message));
+
+                    // Clear metadata cache after scan completes so preview shows fresh data
+                    if matches!(completion.task_type, TaskType::Scan | TaskType::LlmSingle | TaskType::LlmBatch | TaskType::FaceDetection) {
+                        self.image_preview.metadata_cache.clear();
+                    }
                 } else {
                     self.status_message = Some(format!("{} - {}", prefix, completion.message));
                 }
@@ -700,6 +705,22 @@ impl App {
         }
 
         None
+    }
+
+    /// Get full photo metadata from database (cached via ImagePreviewState)
+    pub fn get_photo_metadata(&mut self, path: &std::path::PathBuf) -> Option<crate::db::PhotoMetadata> {
+        // Check if already cached in the preview state
+        if let Some(cached) = self.image_preview.get_cached_metadata(path) {
+            return cached.clone();
+        }
+
+        // Fetch from database
+        let metadata = self.db.get_photo_metadata(path).ok().flatten();
+
+        // Cache for future lookups
+        self.image_preview.cache_metadata(path.clone(), metadata.clone());
+
+        metadata
     }
 
     fn start_scan(&mut self) -> Result<()> {

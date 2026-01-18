@@ -11,38 +11,22 @@ use std::sync::mpsc;
 
 use crate::app::App;
 use crate::config::{ImageProtocol, ThumbnailConfig};
-use crate::db::BoundingBox;
+use crate::db::{BoundingBox, PhotoMetadata};
 use crate::scanner::ThumbnailManager;
-
-/// Cached metadata for an image
-#[derive(Clone)]
-pub struct CachedMetadata {
-    pub dimensions: Option<(u32, u32)>,
-    pub camera_make: Option<String>,
-    pub camera_model: Option<String>,
-    pub taken_at: Option<String>,
-    pub exposure: Option<String>,
-}
 
 /// Manages image preview state and caching
 pub struct ImagePreviewState {
     picker: Option<Picker>,
     /// Cache of loaded images keyed by path (ready to display)
     image_cache: HashMap<PathBuf, StatefulProtocol>,
-    /// Cache of image metadata keyed by path
-    metadata_cache: HashMap<PathBuf, CachedMetadata>,
+    /// Cache of photo metadata from database keyed by path
+    pub metadata_cache: HashMap<PathBuf, Option<PhotoMetadata>>,
     /// Paths currently being loaded in background (images)
     loading_images: HashSet<PathBuf>,
-    /// Paths currently being loaded in background (metadata)
-    loading_metadata: HashSet<PathBuf>,
     /// Receiver for async image loading (resized DynamicImage)
     image_receiver: Option<mpsc::Receiver<(PathBuf, DynamicImage)>>,
     /// Sender for async image loading
     image_sender: mpsc::Sender<(PathBuf, DynamicImage)>,
-    /// Receiver for async metadata loading
-    metadata_receiver: Option<mpsc::Receiver<(PathBuf, CachedMetadata)>>,
-    /// Sender for async metadata loading (cloned for each load task)
-    metadata_sender: mpsc::Sender<(PathBuf, CachedMetadata)>,
     /// Current image being displayed
     current_path: Option<PathBuf>,
     /// Scroll offset for preview text (metadata + description)
@@ -64,7 +48,6 @@ pub struct ImagePreviewState {
 impl ImagePreviewState {
     pub fn new(protocol: ImageProtocol, thumbnail_config: &ThumbnailConfig) -> Self {
         let picker = Self::create_picker(protocol);
-        let (meta_tx, meta_rx) = mpsc::channel();
         let (img_tx, img_rx) = mpsc::channel();
         let (face_tx, face_rx) = mpsc::channel();
         let thumbnail_manager = ThumbnailManager::new(thumbnail_config);
@@ -73,11 +56,8 @@ impl ImagePreviewState {
             image_cache: HashMap::new(),
             metadata_cache: HashMap::new(),
             loading_images: HashSet::new(),
-            loading_metadata: HashSet::new(),
             image_receiver: Some(img_rx),
             image_sender: img_tx,
-            metadata_receiver: Some(meta_rx),
-            metadata_sender: meta_tx,
             current_path: None,
             scroll_offset: 0,
             thumbnail_size: 1024,
@@ -104,7 +84,7 @@ impl ImagePreviewState {
         self.scroll_offset = 0;
     }
 
-    /// Check for completed async loads (images, metadata, and face crops)
+    /// Check for completed async image loads
     pub fn poll_async_loads(&mut self) {
         // Poll for completed images
         if let Some(ref receiver) = self.image_receiver {
@@ -115,14 +95,6 @@ impl ImagePreviewState {
                     let protocol = picker.new_resize_protocol(dyn_img);
                     self.image_cache.insert(path, protocol);
                 }
-            }
-        }
-
-        // Poll for completed metadata
-        if let Some(ref receiver) = self.metadata_receiver {
-            while let Ok((path, metadata)) = receiver.try_recv() {
-                self.loading_metadata.remove(&path);
-                self.metadata_cache.insert(path, metadata);
             }
         }
 
@@ -139,84 +111,25 @@ impl ImagePreviewState {
         }
     }
 
-    /// Get cached metadata for a path, starting async load if not cached
-    pub fn get_metadata(&mut self, path: &PathBuf) -> Option<CachedMetadata> {
-        // Check for completed async loads first
-        self.poll_async_loads();
-
-        // Return cached if available
-        if let Some(metadata) = self.metadata_cache.get(path) {
-            return Some(metadata.clone());
-        }
-
-        // Start async load if not already loading
-        if !self.loading_metadata.contains(path) {
-            self.loading_metadata.insert(path.clone());
-            let path_clone = path.clone();
-            let sender = self.metadata_sender.clone();
-
-            std::thread::spawn(move || {
-                let metadata = Self::load_metadata(&path_clone);
-                let _ = sender.send((path_clone, metadata));
-            });
-        }
-
-        // Return None while loading (UI will show basic info)
-        None
+    /// Get cached metadata for a path. Returns None if not in cache.
+    /// Use App::get_photo_metadata() to load from database.
+    pub fn get_cached_metadata(&self, path: &PathBuf) -> Option<&Option<PhotoMetadata>> {
+        self.metadata_cache.get(path)
     }
 
-    /// Load metadata from an image file (expensive operation, cache the result!)
-    fn load_metadata(path: &PathBuf) -> CachedMetadata {
-        let mut metadata = CachedMetadata {
-            dimensions: None,
-            camera_make: None,
-            camera_model: None,
-            taken_at: None,
-            exposure: None,
-        };
+    /// Cache metadata for a path (called from App after database lookup)
+    pub fn cache_metadata(&mut self, path: PathBuf, metadata: Option<PhotoMetadata>) {
+        self.metadata_cache.insert(path, metadata);
+    }
 
-        // Get dimensions
-        if let Ok(reader) = image::ImageReader::open(path) {
-            if let Ok(dims) = reader.into_dimensions() {
-                metadata.dimensions = Some(dims);
-            }
-        }
+    /// Check if metadata is cached for a path
+    pub fn has_cached_metadata(&self, path: &PathBuf) -> bool {
+        self.metadata_cache.contains_key(path)
+    }
 
-        // Get EXIF data
-        if let Ok(file) = std::fs::File::open(path) {
-            let mut bufreader = std::io::BufReader::new(&file);
-            if let Ok(exif) = exif::Reader::new().read_from_container(&mut bufreader) {
-                if let Some(field) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
-                    metadata.camera_make = Some(field.display_value().to_string());
-                }
-                if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
-                    metadata.camera_model = Some(field.display_value().to_string());
-                }
-                if let Some(field) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
-                    metadata.taken_at = Some(field.display_value().to_string());
-                }
-
-                // Exposure settings (compact format)
-                let mut exposure_parts = Vec::new();
-                if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
-                    exposure_parts.push(format!("f/{}", field.display_value()));
-                }
-                if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
-                    exposure_parts.push(format!("{}s", field.display_value()));
-                }
-                if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
-                    exposure_parts.push(format!("ISO {}", field.display_value()));
-                }
-                if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
-                    exposure_parts.push(format!("{}mm", field.display_value()));
-                }
-                if !exposure_parts.is_empty() {
-                    metadata.exposure = Some(exposure_parts.join(" | "));
-                }
-            }
-        }
-
-        metadata
+    /// Clear metadata cache for a specific path (e.g., after rescan)
+    pub fn invalidate_metadata(&mut self, path: &PathBuf) {
+        self.metadata_cache.remove(path);
     }
 
     fn create_picker(protocol: ImageProtocol) -> Option<Picker> {
@@ -378,8 +291,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             render_directory_preview(frame, &entry.path, block, area);
         }
         Some(ref entry) if is_image(&entry.name) => {
-            let description = app.get_llm_description();
-            render_image_preview(frame, app, entry, description.as_deref(), block, area);
+            // Get metadata from database (cached)
+            let metadata = app.get_photo_metadata(&entry.path);
+            render_image_preview(frame, app, entry, metadata.as_ref(), block, area);
         }
         Some(ref entry) => {
             render_file_preview(frame, entry, block, area);
@@ -421,7 +335,7 @@ fn render_image_preview(
     frame: &mut Frame,
     app: &mut App,
     entry: &crate::app::DirEntry,
-    llm_description: Option<&str>,
+    metadata: Option<&PhotoMetadata>,
     block: Block,
     area: Rect,
 ) {
@@ -432,12 +346,10 @@ fn render_image_preview(
     let show_image = app.config.preview.image_preview && app.image_preview.is_available();
     let scroll_offset = app.image_preview.scroll_offset;
 
-    // Get cached metadata (loads lazily if not cached)
-    let metadata = app.image_preview.get_metadata(&entry.path);
-
     if show_image {
         // Adaptive split: smaller image when we have description content
-        let image_percent = if llm_description.is_some() { 45 } else { 60 };
+        let has_description = metadata.as_ref().map(|m| m.description.is_some()).unwrap_or(false);
+        let image_percent = if has_description { 45 } else { 60 };
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -460,19 +372,18 @@ fn render_image_preview(
             frame.render_widget(loading, chunks[0]);
         }
 
-        // Render metadata below (using cached data)
-        render_image_metadata(frame, entry, metadata.as_ref(), llm_description, chunks[1], scroll_offset);
+        // Render metadata below
+        render_image_metadata(frame, entry, metadata, chunks[1], scroll_offset);
     } else {
         // Just show metadata (fallback mode)
-        render_image_metadata(frame, entry, metadata.as_ref(), llm_description, inner_area, scroll_offset);
+        render_image_metadata(frame, entry, metadata, inner_area, scroll_offset);
     }
 }
 
 fn render_image_metadata(
     frame: &mut Frame,
     entry: &crate::app::DirEntry,
-    metadata: Option<&CachedMetadata>,
-    llm_description: Option<&str>,
+    metadata: Option<&PhotoMetadata>,
     area: Rect,
     scroll_offset: u16,
 ) {
@@ -487,36 +398,68 @@ fn render_image_metadata(
         ]),
     ];
 
-    // Show loading indicator or use cached metadata
-    if metadata.is_none() {
-        info_lines.push(Line::from(Span::styled(
-            "Loading metadata...",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
-        )));
-    }
-
     if let Some(meta) = metadata {
-        if let Some((width, height)) = meta.dimensions {
+        // Dimensions
+        if let (Some(w), Some(h)) = (meta.width, meta.height) {
             info_lines.push(Line::from(vec![
                 Span::styled("Dimensions: ", Style::default().fg(Color::DarkGray)),
-                Span::raw(format!("{}x{}", width, height)),
+                Span::raw(format!("{}x{}", w, h)),
             ]));
         }
 
-        if let Some(ref camera) = meta.camera_make {
+        // Format
+        if let Some(ref format) = meta.format {
+            info_lines.push(Line::from(vec![
+                Span::styled("Format: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format),
+            ]));
+        }
+
+        // Camera info
+        let camera_info: Vec<&str> = [
+            meta.camera_make.as_deref(),
+            meta.camera_model.as_deref(),
+        ]
+        .iter()
+        .filter_map(|s| *s)
+        .collect();
+        if !camera_info.is_empty() {
             info_lines.push(Line::from(vec![
                 Span::styled("Camera: ", Style::default().fg(Color::DarkGray)),
-                Span::raw(camera),
+                Span::raw(camera_info.join(" ")),
             ]));
         }
 
-        if let Some(ref model) = meta.camera_model {
+        // Lens
+        if let Some(ref lens) = meta.lens {
             info_lines.push(Line::from(vec![
-                Span::styled("Model: ", Style::default().fg(Color::DarkGray)),
-                Span::raw(model),
+                Span::styled("Lens: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(lens),
             ]));
         }
 
+        // Exposure settings (compact line)
+        let mut exposure_parts = Vec::new();
+        if let Some(aperture) = meta.aperture {
+            exposure_parts.push(format!("f/{:.1}", aperture));
+        }
+        if let Some(ref shutter) = meta.shutter_speed {
+            exposure_parts.push(format!("{}s", shutter));
+        }
+        if let Some(iso) = meta.iso {
+            exposure_parts.push(format!("ISO {}", iso));
+        }
+        if let Some(focal) = meta.focal_length {
+            exposure_parts.push(format!("{:.0}mm", focal));
+        }
+        if !exposure_parts.is_empty() {
+            info_lines.push(Line::from(vec![
+                Span::styled("Exposure: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(exposure_parts.join(" | ")),
+            ]));
+        }
+
+        // Date taken
         if let Some(ref taken) = meta.taken_at {
             info_lines.push(Line::from(vec![
                 Span::styled("Taken: ", Style::default().fg(Color::DarkGray)),
@@ -524,32 +467,60 @@ fn render_image_metadata(
             ]));
         }
 
-        if let Some(ref exposure) = meta.exposure {
+        // GPS coordinates
+        if let (Some(lat), Some(lon)) = (meta.gps_latitude, meta.gps_longitude) {
             info_lines.push(Line::from(vec![
-                Span::styled("Exposure: ", Style::default().fg(Color::DarkGray)),
-                Span::raw(exposure),
+                Span::styled("GPS: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{:.6}, {:.6}", lat, lon)),
             ]));
         }
-    }
 
-    // LLM description if available
-    if let Some(description) = llm_description {
-        info_lines.push(Line::from(""));
-        info_lines.push(Line::from(Span::styled(
-            "AI Description:",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )));
-        for line in description.lines() {
-            info_lines.push(Line::from(line.to_string()));
+        // Faces and people
+        if meta.face_count > 0 {
+            let face_text = if meta.people_names.is_empty() {
+                format!("{} face{}", meta.face_count, if meta.face_count == 1 { "" } else { "s" })
+            } else {
+                format!("{} ({})", meta.face_count, meta.people_names.join(", "))
+            };
+            info_lines.push(Line::from(vec![
+                Span::styled("Faces: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(face_text),
+            ]));
         }
+
+        // Scanned timestamp
+        if let Some(ref scanned) = meta.scanned_at {
+            info_lines.push(Line::from(vec![
+                Span::styled("Scanned: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(scanned),
+            ]));
+        }
+
+        // AI Description
+        if let Some(ref description) = meta.description {
+            info_lines.push(Line::from(""));
+            info_lines.push(Line::from(Span::styled(
+                "AI Description:",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )));
+            for line in description.lines() {
+                info_lines.push(Line::from(line.to_string()));
+            }
+        }
+    } else {
+        // Not in database
+        info_lines.push(Line::from(Span::styled(
+            "Not scanned yet",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+        )));
     }
 
-    // Hint for AI description and scroll
+    // Hint for actions
     info_lines.push(Line::from(""));
-    let hint = if llm_description.is_some() {
+    let hint = if metadata.as_ref().map(|m| m.description.is_some()).unwrap_or(false) {
         "[D] regenerate | [{ }] scroll"
     } else {
-        "[D] describe with AI"
+        "[D] describe with AI | [s] scan"
     };
     info_lines.push(Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))));
 
