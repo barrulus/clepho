@@ -510,6 +510,9 @@ impl App {
             // Face detection on current directory
             KeyCode::Char('F') => self.start_face_scan()?,
 
+            // CLIP embedding (image indexing)
+            KeyCode::Char('I') => self.start_clip_embedding()?,
+
             // Face clustering
             KeyCode::Char('C') => self.cluster_faces()?,
 
@@ -1694,6 +1697,103 @@ impl App {
             }
         }
 
+        Ok(())
+    }
+
+    // --- CLIP embedding methods ---
+
+    /// Start CLIP embedding generation for photos in current directory
+    fn start_clip_embedding(&mut self) -> Result<()> {
+        use crate::tasks::TaskType;
+
+        // Don't start if already running
+        if self.task_manager.is_running(TaskType::ClipEmbedding) {
+            self.status_message = Some("CLIP embedding already running".to_string());
+            return Ok(());
+        }
+
+        // Get photos without embeddings in current directory
+        let current_dir = self.current_dir.to_string_lossy().to_string();
+        let photos = self.db.get_photos_without_embeddings_in_dir(&current_dir, 100)?;
+
+        if photos.is_empty() {
+            self.status_message = Some("No photos need embedding in this directory".to_string());
+            return Ok(());
+        }
+
+        let total = photos.len();
+        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::ClipEmbedding);
+        let db_path = self.config.db_path.clone();
+
+        // Spawn CLIP embedding in background thread
+        std::thread::spawn(move || {
+            use crate::tasks::{TaskUpdate, TaskProgress};
+            use crate::clip::ClipModel;
+            use std::sync::atomic::Ordering;
+
+            let db = match crate::db::Database::open(&db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Failed to open database: {}", e),
+                    });
+                    return;
+                }
+            };
+
+            let _ = tx.send(TaskUpdate::Started { total });
+
+            // Initialize CLIP model
+            let _ = tx.send(TaskUpdate::Progress(
+                TaskProgress::new(0, total).with_message("Loading CLIP model...")
+            ));
+
+            let mut clip = ClipModel::new();
+            if let Err(e) = clip.init() {
+                let _ = tx.send(TaskUpdate::Failed {
+                    error: format!("Failed to initialize CLIP model: {}", e),
+                });
+                return;
+            }
+
+            let mut processed = 0;
+            for (idx, (photo_id, path)) in photos.iter().enumerate() {
+                // Check for cancellation
+                if cancel_flag.load(Ordering::SeqCst) {
+                    let _ = tx.send(TaskUpdate::Cancelled);
+                    return;
+                }
+
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+
+                let _ = tx.send(TaskUpdate::Progress(
+                    TaskProgress::new(idx + 1, total).with_item(&filename)
+                ));
+
+                // Generate embedding
+                match clip.embed_image_file(std::path::Path::new(path)) {
+                    Ok(embedding) => {
+                        if let Err(e) = db.store_embedding(*photo_id, &embedding, "clip-vit-base-patch32") {
+                            eprintln!("Failed to store embedding for {}: {}", path, e);
+                        } else {
+                            processed += 1;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to generate embedding for {}: {}", path, e);
+                    }
+                }
+            }
+
+            let _ = tx.send(TaskUpdate::Completed {
+                message: format!("Generated {} CLIP embeddings", processed),
+            });
+        });
+
+        self.status_message = Some(format!("Generating CLIP embeddings for {} photos...", total));
         Ok(())
     }
 

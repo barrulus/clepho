@@ -166,6 +166,33 @@ impl Database {
         Ok(results)
     }
 
+    /// Get photos without embeddings in a specific directory (and subdirectories)
+    pub fn get_photos_without_embeddings_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+        let dir_pattern = if directory.ends_with('/') {
+            format!("{}%", directory)
+        } else {
+            format!("{}/%", directory)
+        };
+
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT p.id, p.path
+            FROM photos p
+            LEFT JOIN embeddings e ON p.id = e.photo_id
+            WHERE e.photo_id IS NULL
+              AND p.path LIKE ?
+            LIMIT ?
+            "#,
+        )?;
+
+        let results = stmt
+            .query_map(params![dir_pattern, limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(results)
+    }
+
     /// Count photos with embeddings
     pub fn count_embeddings(&self) -> Result<i64> {
         let count: i64 = self.conn.query_row(
