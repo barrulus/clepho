@@ -273,7 +273,11 @@ impl App {
                     Event::Mouse(mouse) => {
                         let size = terminal.size()?;
                         let area = Rect::new(0, 0, size.width, size.height);
-                        self.handle_mouse(mouse, area)?;
+                        match self.mode {
+                            AppMode::PeopleManaging => self.handle_people_dialog_mouse(mouse, area)?,
+                            AppMode::Normal => self.handle_mouse(mouse, area)?,
+                            _ => {} // Other modes don't have mouse support yet
+                        }
                     }
                     Event::Resize(_, _) => {}
                     _ => {}
@@ -604,6 +608,112 @@ impl App {
                     // Scroll file list up
                     self.move_up();
                 }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn handle_people_dialog_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Result<()> {
+        use crate::ui::people_dialog::{InputMode, PeopleViewMode};
+
+        let dialog = match self.people_dialog.as_mut() {
+            Some(d) => d,
+            None => return Ok(()),
+        };
+
+        // Don't handle mouse events in naming mode (let keyboard handle input)
+        if dialog.input_mode == InputMode::Naming {
+            return Ok(());
+        }
+
+        // Calculate dialog dimensions (matching render logic in people_dialog.rs)
+        let base_width = if dialog.view_mode == PeopleViewMode::Faces { 100 } else { 70 };
+        let dialog_width = base_width.min(area.width.saturating_sub(4));
+        let dialog_height = 30.min(area.height.saturating_sub(4));
+
+        let dialog_x = (area.width - dialog_width) / 2;
+        let dialog_y = (area.height - dialog_height) / 2;
+
+        let mouse_x = mouse.column;
+        let mouse_y = mouse.row;
+
+        // Check if click is within dialog bounds
+        if mouse_x < dialog_x || mouse_x >= dialog_x + dialog_width
+            || mouse_y < dialog_y || mouse_y >= dialog_y + dialog_height
+        {
+            return Ok(());
+        }
+
+        // Convert to dialog-local coordinates (accounting for border)
+        let local_x = mouse_x - dialog_x - 1;
+        let local_y = mouse_y - dialog_y - 1;
+
+        // Inner dialog dimensions (after border)
+        let inner_width = dialog_width.saturating_sub(2);
+        let inner_height = dialog_height.saturating_sub(2);
+
+        // Layout matches people_dialog.rs render():
+        // - Row 0-1: Tab bar (height 2)
+        // - Row 2+: List area (or list+preview in Faces view)
+        // - Bottom rows: input, status, footer
+
+        let tab_bar_height = 2;
+        let footer_height = 5; // status + footer + potential name input
+        let list_start_y = tab_bar_height;
+        let list_height = inner_height.saturating_sub(tab_bar_height + footer_height);
+
+        match mouse.kind {
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                // Check if click is in tab bar area
+                if local_y < tab_bar_height {
+                    // Rough detection: "People" is at the start, "Faces" is further right
+                    // Tab text: " People (N)  |  Faces (N)   [Tab to switch]"
+                    // People tab roughly spans columns 1-15, Faces tab spans 18-35
+                    if local_x < 17 {
+                        // Clicked on People tab
+                        if dialog.view_mode != PeopleViewMode::People {
+                            dialog.toggle_view_mode();
+                        }
+                    } else if local_x < 35 {
+                        // Clicked on Faces tab
+                        if dialog.view_mode != PeopleViewMode::Faces {
+                            dialog.toggle_view_mode();
+                        }
+                    }
+                } else if local_y >= list_start_y && local_y < list_start_y + list_height {
+                    // Click in list area
+                    // Account for list border (1 row for top border)
+                    let list_local_y = local_y - list_start_y - 1;
+
+                    // Each item takes 2 rows (name + subtext)
+                    let clicked_index = (list_local_y / 2) as usize;
+
+                    let max_index = match dialog.view_mode {
+                        PeopleViewMode::People => dialog.people.len().saturating_sub(1),
+                        PeopleViewMode::Faces => dialog.faces.len().saturating_sub(1),
+                    };
+
+                    // In Faces view, only left half is the list (right half is preview)
+                    let in_list_area = if dialog.view_mode == PeopleViewMode::Faces {
+                        local_x < inner_width / 2
+                    } else {
+                        true
+                    };
+
+                    if in_list_area && clicked_index <= max_index {
+                        dialog.selected_index = clicked_index;
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                // Scroll down in list
+                dialog.move_down();
+            }
+            MouseEventKind::ScrollUp => {
+                // Scroll up in list
+                dialog.move_up();
             }
             _ => {}
         }
