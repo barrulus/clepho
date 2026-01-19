@@ -335,20 +335,28 @@ impl Database {
         Ok(faces)
     }
 
-    /// Get photos that haven't been scanned for faces
-    pub fn get_photos_without_faces(&self, limit: usize) -> Result<Vec<(i64, String)>> {
+    /// Get photos that haven't been scanned for faces in a specific directory (and subdirectories)
+    pub fn get_photos_without_faces_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+        // Use LIKE with directory prefix to match subdirectories
+        let dir_pattern = if directory.ends_with('/') {
+            format!("{}%", directory)
+        } else {
+            format!("{}/%", directory)
+        };
+
         let mut stmt = self.conn.prepare(
             r#"
             SELECT p.id, p.path
             FROM photos p
             LEFT JOIN face_scans fs ON p.id = fs.photo_id
             WHERE fs.photo_id IS NULL
+              AND p.path LIKE ?
             LIMIT ?
             "#,
         )?;
 
         let results = stmt
-            .query_map([limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(params![dir_pattern, limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
             .filter_map(|r| r.ok())
             .collect();
 

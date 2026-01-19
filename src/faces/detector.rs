@@ -64,16 +64,18 @@ pub fn init_models() -> Result<()> {
         "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-11-int8.onnx"
     )?;
 
-    // Initialize detection model
+    // Initialize detection model with multi-threading
     let detection_session = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_intra_threads(4)?
         .commit_from_file(&detection_model_path)?;
 
     let _ = DETECTION_MODEL.set(Mutex::new(detection_session));
 
-    // Initialize embedding model
+    // Initialize embedding model with multi-threading
     let embedding_session = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_intra_threads(4)?
         .commit_from_file(&embedding_model_path)?;
 
     let _ = EMBEDDING_MODEL.set(Mutex::new(embedding_session));
@@ -92,10 +94,15 @@ pub fn detect_faces(image_path: &Path) -> Result<Vec<DetectedFace>> {
         init_models()?;
     }
 
-    let img = image::open(image_path)
-        .map_err(|e| anyhow!("Failed to load image: {}", e))?;
+    // Use fast JPEG loading with downscaling for detection
+    let img = load_image_for_detection(image_path)?;
 
     detect_faces_in_image(&img)
+}
+
+/// Load image optimized for face detection
+fn load_image_for_detection(path: &Path) -> Result<DynamicImage> {
+    image::open(path).map_err(|e| anyhow!("Failed to load image: {}", e))
 }
 
 /// Detect faces in a DynamicImage
@@ -161,8 +168,8 @@ fn run_ultraface_detection(session: &mut Session, img: &DynamicImage) -> Result<
 
     let (orig_width, orig_height) = img.dimensions();
 
-    // Resize image to model input size
-    let resized = img.resize_exact(INPUT_WIDTH, INPUT_HEIGHT, image::imageops::FilterType::Lanczos3);
+    // Resize image to model input size (use Triangle/bilinear for speed)
+    let resized = img.resize_exact(INPUT_WIDTH, INPUT_HEIGHT, image::imageops::FilterType::Triangle);
     let rgb = resized.to_rgb8();
 
     // Convert to tensor (NCHW format, normalized)
@@ -294,8 +301,8 @@ fn crop_face(img: &DynamicImage, bbox: &BoundingBox, img_width: u32, img_height:
 fn run_arcface_embedding(session: &mut Session, face_img: &DynamicImage) -> Result<Vec<f32>> {
     const INPUT_SIZE: u32 = 112;
 
-    // Resize to ArcFace input size
-    let resized = face_img.resize_exact(INPUT_SIZE, INPUT_SIZE, image::imageops::FilterType::Lanczos3);
+    // Resize to ArcFace input size (use Triangle/bilinear for speed)
+    let resized = face_img.resize_exact(INPUT_SIZE, INPUT_SIZE, image::imageops::FilterType::Triangle);
     let rgb = resized.to_rgb8();
 
     // Convert to tensor (NCHW format, normalized)

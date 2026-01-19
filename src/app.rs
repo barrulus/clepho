@@ -1632,8 +1632,9 @@ impl App {
             return Ok(());
         }
 
-        // Get photos without faces in current directory
-        let photos = self.db.get_photos_without_faces(100)?;
+        // Get photos without faces in current directory (and subdirectories)
+        let current_dir = self.current_dir.to_string_lossy().to_string();
+        let photos = self.db.get_photos_without_faces_in_dir(&current_dir, 100)?;
 
         if photos.is_empty() {
             self.status_message = Some("No unscanned photos found".to_string());
