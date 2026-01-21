@@ -148,6 +148,9 @@ impl App {
         let image_preview = ImagePreviewState::new(config.preview.protocol, &config.thumbnails);
         let trash_manager = TrashManager::new(config.trash.clone());
         let action_map = config.keybindings.build_action_map();
+        // Extract view settings before moving config
+        let show_hidden = config.view.show_hidden;
+        let show_all_files = config.view.show_all_files;
         let mut app = Self {
             config,
             db,
@@ -189,8 +192,8 @@ impl App {
             slideshow_view: None,
             centralise_dialog: None,
             action_map,
-            show_hidden: false,
-            show_all_files: false,
+            show_hidden,
+            show_all_files,
         };
         app.load_directory(&current_dir)?;
 
@@ -353,7 +356,7 @@ impl App {
         // Handle help mode
         if self.mode == AppMode::Help {
             match key.code {
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+                KeyCode::Esc | KeyCode::Char('?') => {
                     self.mode = AppMode::Normal;
                 }
                 _ => {}
@@ -867,8 +870,20 @@ impl App {
 
     fn go_parent(&mut self) -> Result<()> {
         if let Some(parent) = self.current_dir.parent() {
+            // Remember the current directory name to select it in parent
+            let current_name = self.current_dir.file_name().map(|n| n.to_os_string());
             let parent = parent.to_path_buf();
             self.load_directory(&parent)?;
+            // Select the directory we came from
+            if let Some(name) = current_name {
+                if let Some(idx) = self.entries.iter().position(|e| e.path.file_name() == Some(&name)) {
+                    self.selected_index = idx;
+                    // Adjust scroll to keep selection visible
+                    if self.selected_index < self.scroll_offset {
+                        self.scroll_offset = self.selected_index;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1006,7 +1021,7 @@ impl App {
     fn handle_duplicates_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             // Exit duplicates view
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.mode = AppMode::Normal;
                 self.duplicates_view = None;
             }
@@ -1407,7 +1422,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.move_dialog = None;
                 self.mode = AppMode::Normal;
                 self.status_message = Some("Move cancelled".to_string());
@@ -1631,7 +1646,7 @@ impl App {
         let dialog = self.export_dialog.as_mut().unwrap();
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.export_dialog = None;
                 self.mode = AppMode::Normal;
                 self.status_message = Some("Export cancelled".to_string());
@@ -1982,7 +1997,7 @@ impl App {
     fn handle_task_list_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             // Exit task list
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('T') => {
+            KeyCode::Esc => {
                 self.mode = AppMode::Normal;
             }
             // Cancel task by number
@@ -2027,7 +2042,7 @@ impl App {
         let dialog = self.trash_dialog.as_mut().unwrap();
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.trash_dialog = None;
                 self.mode = AppMode::Normal;
             }
@@ -2486,7 +2501,7 @@ impl App {
 
         // Normal navigation mode
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.people_dialog = None;
                 self.mode = AppMode::Normal;
             }
@@ -2495,6 +2510,17 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 dialog.move_up();
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                // Move left or close dialog if already at leftmost pane
+                if !dialog.move_left() {
+                    self.people_dialog = None;
+                    self.mode = AppMode::Normal;
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                // Move right to preview pane (only in Faces view)
+                dialog.move_right();
             }
             KeyCode::Tab => {
                 dialog.toggle_view_mode();
@@ -2576,7 +2602,7 @@ impl App {
         let dialog = self.changes_dialog.as_mut().unwrap();
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 // Put changes back so indicator stays visible
                 let changes = dialog.changes.clone();
                 self.detected_changes = Some(changes);
@@ -2643,7 +2669,7 @@ impl App {
         let dialog = self.schedule_dialog.as_mut().unwrap();
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.schedule_dialog = None;
                 self.mode = AppMode::Normal;
                 self.status_message = Some("Schedule cancelled".to_string());
@@ -2727,7 +2753,7 @@ impl App {
         let dialog = self.overdue_dialog.as_mut().unwrap();
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.overdue_dialog = None;
                 self.mode = AppMode::Normal;
             }
@@ -2858,7 +2884,7 @@ impl App {
 
         match key.code {
             // Exit gallery
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.gallery_view = None;
                 self.mode = AppMode::Normal;
             }
@@ -2967,7 +2993,7 @@ impl App {
         match dialog.mode {
             TagDialogMode::ViewTags => {
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
+                    KeyCode::Esc => {
                         self.tag_dialog = None;
                         self.mode = AppMode::Normal;
                     }
@@ -3084,7 +3110,7 @@ impl App {
 
         match key.code {
             // Exit slideshow
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.slideshow_view = None;
                 self.mode = AppMode::Normal;
             }
@@ -3167,6 +3193,9 @@ impl App {
         self.show_hidden = !self.show_hidden;
         let state = if self.show_hidden { "shown" } else { "hidden" };
         self.status_message = Some(format!("Hidden files: {}", state));
+        // Persist to config
+        self.config.view.show_hidden = self.show_hidden;
+        let _ = self.config.save(); // Ignore save errors to not disrupt the UI
         // Reload directory to apply filter
         let current_dir = self.current_dir.clone();
         self.load_directory(&current_dir)?;
@@ -3178,6 +3207,9 @@ impl App {
         self.show_all_files = !self.show_all_files;
         let state = if self.show_all_files { "all files" } else { "images only" };
         self.status_message = Some(format!("Showing: {}", state));
+        // Persist to config
+        self.config.view.show_all_files = self.show_all_files;
+        let _ = self.config.save(); // Ignore save errors to not disrupt the UI
         // Reload directory to apply filter
         let current_dir = self.current_dir.clone();
         self.load_directory(&current_dir)?;
@@ -3268,7 +3300,7 @@ impl App {
         match dialog.mode {
             CentraliseDialogMode::Configure => {
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
+                    KeyCode::Esc => {
                         self.centralise_dialog = None;
                         self.mode = AppMode::Normal;
                     }
@@ -3334,7 +3366,7 @@ impl App {
             }
             CentraliseDialogMode::Results => {
                 match key.code {
-                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                    KeyCode::Esc | KeyCode::Enter => {
                         // Clear selection since files may have moved
                         self.selected_files.clear();
                         self.centralise_dialog = None;

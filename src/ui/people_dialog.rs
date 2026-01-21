@@ -45,12 +45,24 @@ pub enum InputMode {
     Naming,
 }
 
+/// Active pane in the dialog (for keyboard navigation)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PeopleActivePane {
+    /// List pane (left side)
+    #[default]
+    List,
+    /// Preview pane (right side, only in Faces view)
+    Preview,
+}
+
 /// State for the people management dialog
 pub struct PeopleDialog {
     /// Current view mode
     pub view_mode: PeopleViewMode,
     /// Input mode
     pub input_mode: InputMode,
+    /// Active pane for navigation
+    pub active_pane: PeopleActivePane,
     /// Named people
     pub people: Vec<Person>,
     /// Unassigned faces
@@ -75,6 +87,7 @@ impl PeopleDialog {
                 PeopleViewMode::People
             },
             input_mode: InputMode::Normal,
+            active_pane: PeopleActivePane::List,
             people,
             faces: face_entries,
             selected_index: 0,
@@ -90,6 +103,28 @@ impl PeopleDialog {
             PeopleViewMode::Faces => PeopleViewMode::People,
         };
         self.selected_index = 0;
+        self.active_pane = PeopleActivePane::List;
+    }
+
+    /// Move focus to the right (list -> preview)
+    pub fn move_right(&mut self) -> bool {
+        // Preview only available in Faces view
+        if self.view_mode == PeopleViewMode::Faces && self.active_pane == PeopleActivePane::List {
+            self.active_pane = PeopleActivePane::Preview;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move focus to the left (preview -> list)
+    pub fn move_left(&mut self) -> bool {
+        if self.active_pane == PeopleActivePane::Preview {
+            self.active_pane = PeopleActivePane::List;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn move_up(&mut self) {
@@ -384,12 +419,17 @@ fn render_people_list(frame: &mut Frame, dialog: &PeopleDialog, area: Rect) {
 }
 
 fn render_faces_with_preview(frame: &mut Frame, app: &mut App, area: Rect) {
-    let dialog = match app.people_dialog.as_ref() {
-        Some(d) => d,
+    let (faces_empty, active_pane, selected_index, faces_data) = match app.people_dialog.as_ref() {
+        Some(d) => (
+            d.faces.is_empty(),
+            d.active_pane,
+            d.selected_index,
+            d.faces.iter().map(|f| (f.photo_filename.clone(), f.face_id)).collect::<Vec<_>>(),
+        ),
         None => return,
     };
 
-    if dialog.faces.is_empty() {
+    if faces_empty {
         let empty = Paragraph::new("No unassigned faces.\nRun face detection first (F key in browser).")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center)
@@ -412,17 +452,28 @@ fn render_faces_with_preview(frame: &mut Frame, app: &mut App, area: Rect) {
         ])
         .split(area);
 
+    // Determine border colors based on active pane
+    let list_border_color = if active_pane == PeopleActivePane::List {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+    let preview_border_color = if active_pane == PeopleActivePane::Preview {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+
     // Render face list
-    let items: Vec<ListItem> = dialog
-        .faces
+    let items: Vec<ListItem> = faces_data
         .iter()
-        .map(|face| {
+        .map(|(filename, face_id)| {
             ListItem::new(vec![
                 Line::from(vec![
-                    Span::styled(&face.photo_filename, Style::default().fg(Color::Yellow)),
+                    Span::styled(filename, Style::default().fg(Color::Yellow)),
                 ]),
                 Line::from(Span::styled(
-                    format!("  Face #{}", face.face_id),
+                    format!("  Face #{}", face_id),
                     Style::default().fg(Color::DarkGray),
                 )),
             ])
@@ -434,7 +485,7 @@ fn render_faces_with_preview(frame: &mut Frame, app: &mut App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Unassigned Faces ")
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(Style::default().fg(list_border_color)),
         )
         .highlight_style(
             Style::default()
@@ -444,18 +495,18 @@ fn render_faces_with_preview(frame: &mut Frame, app: &mut App, area: Rect) {
         );
 
     let mut state = ListState::default();
-    state.select(Some(dialog.selected_index));
+    state.select(Some(selected_index));
     frame.render_stateful_widget(list, chunks[0], &mut state);
 
     // Render face preview
-    render_face_preview(frame, app, chunks[1]);
+    render_face_preview(frame, app, chunks[1], preview_border_color);
 }
 
-fn render_face_preview(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_face_preview(frame: &mut Frame, app: &mut App, area: Rect, border_color: Color) {
     let preview_block = Block::default()
         .borders(Borders::ALL)
         .title(" Face Preview ")
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(border_color));
 
     // Get selected face info before borrowing app mutably
     let face_info = app.people_dialog.as_ref().and_then(|d| {

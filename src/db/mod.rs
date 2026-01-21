@@ -354,8 +354,40 @@ impl Database {
         Ok(())
     }
 
+    /// Ensure a minimal photo record exists in the database.
+    /// Creates a stub record if the photo doesn't exist yet.
+    fn ensure_photo_exists(&self, path: &std::path::Path) -> Result<()> {
+        let path_str = path.to_string_lossy();
+        let exists: bool = self.conn.query_row(
+            "SELECT 1 FROM photos WHERE path = ?",
+            [path_str.as_ref()],
+            |_| Ok(true),
+        ).unwrap_or(false);
+
+        if !exists {
+            let filename = path.file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let directory = path.parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let size_bytes = std::fs::metadata(path)
+                .map(|m| m.len() as i64)
+                .unwrap_or(0);
+
+            self.conn.execute(
+                "INSERT INTO photos (path, filename, directory, size_bytes) VALUES (?, ?, ?, ?)",
+                rusqlite::params![path_str.as_ref(), filename, directory, size_bytes],
+            )?;
+        }
+        Ok(())
+    }
+
     /// Rotate a photo clockwise by 90 degrees (adds to user rotation).
     pub fn rotate_photo_cw(&self, path: &std::path::Path) -> Result<i32> {
+        // Ensure photo record exists before updating
+        self.ensure_photo_exists(path)?;
+
         let path_str = path.to_string_lossy();
         let current: i32 = self.conn.query_row(
             "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
@@ -375,6 +407,9 @@ impl Database {
 
     /// Rotate a photo counter-clockwise by 90 degrees (subtracts from user rotation).
     pub fn rotate_photo_ccw(&self, path: &std::path::Path) -> Result<i32> {
+        // Ensure photo record exists before updating
+        self.ensure_photo_exists(path)?;
+
         let path_str = path.to_string_lossy();
         let current: i32 = self.conn.query_row(
             "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",

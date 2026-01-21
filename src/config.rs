@@ -32,6 +32,21 @@ pub struct Config {
 
     #[serde(default)]
     pub keybindings: KeyBindings,
+
+    #[serde(default)]
+    pub view: ViewConfig,
+}
+
+/// View filter settings (persisted across sessions)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ViewConfig {
+    /// Show hidden files/directories (starting with .)
+    #[serde(default)]
+    pub show_hidden: bool,
+
+    /// Show all files, not just supported image formats
+    #[serde(default)]
+    pub show_all_files: bool,
 }
 
 /// Database backend type
@@ -744,6 +759,7 @@ impl Default for Config {
             schedule: ScheduleConfig::default(),
             library: LibraryConfig::default(),
             keybindings: KeyBindings::default(),
+            view: ViewConfig::default(),
         }
     }
 }
