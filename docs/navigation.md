@@ -148,18 +148,31 @@ Selected files are highlighted and can be used with:
 - `e` - Export metadata
 - `@` - Schedule processing
 
+## View Filtering
+
+By default, Clepho hides dotfiles/directories and shows only supported image files. Toggle filters to see everything:
+
+| Key | Action |
+|-----|--------|
+| `H` | Toggle hidden files (dotfiles) |
+| `.` | Toggle show all files vs images only |
+
+When filters are active, the status bar shows indicators like `[.*]` (hidden shown) or `[all]` (all files shown).
+
 ## Status Bar
 
 The bottom status bar shows:
 
 ```
-~/Photos/2024 | 3 dirs, 45 files | [S:75%] [!2 changes] | s:scan c:changes ?:help q:quit
+~/Photos/2024 | 3 dirs, 45 files | [.*,all] | [S:75%] [!2 changes] | s:scan ?:help q:quit
 ```
 
 | Element | Meaning |
 |---------|---------|
 | Path | Current directory |
 | Counts | Directory and file counts |
+| `[.*]` | Hidden files visible |
+| `[all]` | All files visible (not just images) |
 | `[S:75%]` | Running scan at 75% |
 | `[!2 changes]` | 2 file changes detected |
 | Hints | Available keyboard shortcuts |

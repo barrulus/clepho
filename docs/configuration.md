@@ -193,6 +193,55 @@ default_hours_start = 9   # 9 AM
 default_hours_end = 17    # 5 PM
 ```
 
+### Keybindings (`[keybindings]`)
+
+All keybindings are configurable. Keys can be simple characters or include modifiers:
+
+```toml
+[keybindings]
+# Navigation
+move_down = ["j", "Down"]
+move_up = ["k", "Up"]
+go_parent = ["h", "Left", "Backspace"]
+enter_selected = ["l", "Right", "Enter"]
+
+# Actions
+scan = ["s"]
+find_duplicates = ["d"]
+describe_with_llm = ["D"]
+open_slideshow = ["S"]
+toggle_hidden = ["H"]
+toggle_show_all_files = ["."]
+open_external = ["o"]
+
+# With modifiers
+page_down = ["Ctrl+f"]
+page_up = ["Ctrl+b"]
+```
+
+#### Key Format
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Simple | `"j"` | Single character |
+| Uppercase | `"G"` | Shift+letter |
+| Special | `"Enter"`, `"Space"`, `"Esc"` | Named keys |
+| Modifier | `"Ctrl+f"` | With Ctrl/Alt/Shift |
+
+### Library (`[library]`)
+
+Configure a central library location for organizing photos:
+
+```toml
+[library]
+# Target directory for centralised files
+path = "~/Photos/Library"
+
+# Organization pattern: {year}/{month}/{filename}
+# Available: {year}, {month}, {day}, {filename}, {ext}
+pattern = "{year}/{month}"
+```
+
 ## Environment Variables
 
 Some settings can be overridden via environment variables:

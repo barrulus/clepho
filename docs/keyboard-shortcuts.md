@@ -50,6 +50,8 @@ These work in most modes:
 | `D` | Describe selected image with AI |
 | `P` | Batch process all photos with AI |
 | `F` | Detect faces in scanned photos |
+| `C` | Cluster similar faces |
+| `I` | Generate CLIP embeddings |
 | `/` | Open semantic search |
 
 ### File Operations
@@ -57,8 +59,21 @@ These work in most modes:
 | Key | Action |
 |-----|--------|
 | `m` | Move selected files |
-| `r` | Rename selected files |
-| `e` | Export metadata |
+| `R` | Rename selected files |
+| `E` | Export metadata |
+| `y` | Yank (copy) selected files |
+| `Y` | Paste yanked files |
+| `]` | Rotate photo clockwise |
+| `[` | Rotate photo counter-clockwise |
+| `Delete` | Move to trash |
+| `L` | Centralise files to library |
+
+### View Filters
+
+| Key | Action |
+|-----|--------|
+| `H` | Toggle hidden files/directories |
+| `.` | Toggle show all files (vs images only) |
 
 ### Dialogs & Views
 
@@ -69,13 +84,17 @@ These work in most modes:
 | `c` | Check for file changes |
 | `@` | Open schedule dialog |
 | `T` | Open task list |
+| `A` | Open gallery view |
+| `S` | Open slideshow |
+| `b` | Open tags dialog |
+| `e` | Edit photo description |
 | `?` | Show help overlay |
 
 ### External
 
 | Key | Action |
 |-----|--------|
-| `Enter` (on image) | Open in external viewer |
+| `o` | Open in system viewer |
 | Right-click | Open in external viewer |
 
 ## Visual Mode
@@ -286,7 +305,7 @@ Entered with `?`:
 
 ## Customization
 
-Currently, keybindings are not user-configurable. Future versions may support custom key mappings via configuration.
+Keybindings are configurable in `config.toml`. See [configuration.md](configuration.md) for details.
 
 ## Quick Reference Card
 
@@ -296,10 +315,13 @@ j/k     up/down     s   scan            d  duplicates
 h/l     left/right  D   AI describe     p  people
 gg/G    top/bottom  P   batch AI        t  trash
 ~       home        F   face detect     T  tasks
-                    /   search          c  changes
-SELECTION           m   move            @  schedule
-Space   toggle      r   rename          ?  help
-v       visual      e   export
-V       all         x   trash
-                    X   delete
+                    C   cluster faces   c  changes
+SELECTION           I   CLIP embed      @  schedule
+Space   toggle      /   search          A  gallery
+V       visual      m   move            S  slideshow
+                    R   rename          b  tags
+FILTERS             E   export          ?  help
+H       hidden      y   yank
+.       all files   Y   paste           EXTERNAL
+                    Del trash           o  open file
 ```
