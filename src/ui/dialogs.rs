@@ -6,7 +6,7 @@ use ratatui::{
 pub fn render_help(frame: &mut Frame, area: Rect) {
     // Center the help dialog
     let dialog_width = 60.min(area.width.saturating_sub(4));
-    let dialog_height = 33.min(area.height.saturating_sub(4));
+    let dialog_height = 35.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -50,6 +50,11 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  E          Export photo database"),
         Line::from("  /          Semantic search photos"),
         Line::from("  p          Manage people/faces"),
+        Line::from("  ]          Rotate photo clockwise"),
+        Line::from("  [          Rotate photo counter-clockwise"),
+        Line::from("  o          Open file in system viewer"),
+        Line::from("  H          Toggle hidden files/dirs"),
+        Line::from("  .          Toggle show all files"),
         Line::from("  ?          Show this help"),
         Line::from("  q          Quit"),
         Line::from(""),

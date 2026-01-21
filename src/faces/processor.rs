@@ -20,26 +20,34 @@ impl FaceProcessor {
         Self { _initialized: false }
     }
 
-    /// Initialize face detection models (call once at startup for faster first detection)
+    /// Initialize face detection model only (fast - no embedding model)
+    /// Embedding model will be loaded on-demand when clustering is requested
     pub fn init_models(&mut self) -> Result<()> {
-        detector::init_models()?;
+        detector::init_detection_model()?;
         self._initialized = true;
         Ok(())
     }
 
-    /// Process a single image and detect faces using dlib
+    /// Process a single image and detect faces (fast mode - no embeddings)
+    /// Embeddings will be generated later when clustering is requested
     pub fn process_image(&self, db: &Database, photo_id: i64, image_path: &Path) -> Result<usize> {
-        // Detect faces using dlib (includes embeddings)
-        let detected_faces = detector::detect_faces(image_path)?;
+        // Detect faces using fast mode (no embeddings)
+        let detected_faces = detector::detect_faces_fast(image_path)?;
 
         let mut faces_added = 0;
 
         for face in detected_faces {
-            // Store face with embedding
+            // Store face without embedding (will be generated on-demand for clustering)
+            let embedding = if face.embedding.is_empty() {
+                None
+            } else {
+                Some(face.embedding.as_slice())
+            };
+
             db.store_face(
                 photo_id,
                 &face.bbox,
-                Some(&face.embedding),
+                embedding,
                 Some(face.confidence),
             )?;
             faces_added += 1;
@@ -106,7 +114,7 @@ impl FaceProcessor {
                 }
                 Err(e) => {
                     // Log error but continue processing
-                    eprintln!("Error processing {}: {}", path, e);
+                    tracing::error!(path = %path, error = %e, "Face detection error");
                 }
             }
         }

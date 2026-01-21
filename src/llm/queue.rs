@@ -82,7 +82,7 @@ impl LlmQueue {
                 Err(e) => {
                     failed += 1;
                     // Continue processing other tasks despite errors
-                    eprintln!("Error processing {}: {}", task.photo_path.display(), e);
+                    tracing::error!(path = %task.photo_path.display(), error = %e, "LLM processing error");
                 }
             }
         }

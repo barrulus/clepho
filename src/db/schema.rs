@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS photos (
     taken_at TEXT,
     gps_latitude REAL,
     gps_longitude REAL,
+    exif_orientation INTEGER DEFAULT 1,  -- EXIF orientation (1-8)
+    user_rotation INTEGER DEFAULT 0,      -- User-applied rotation in degrees (0, 90, 180, 270)
 
     -- Complete EXIF data as JSON
     all_exif TEXT,
@@ -193,4 +195,63 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_scheduled_at ON scheduled_tasks(scheduled_at);
+
+-- User-defined tags (distinct from LLM-generated tags)
+CREATE TABLE IF NOT EXISTS user_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT DEFAULT '#808080',  -- Hex color for visual distinction
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_tags_name ON user_tags(name);
+
+-- Photo to user tag mapping
+CREATE TABLE IF NOT EXISTS photo_user_tags (
+    photo_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (photo_id, tag_id),
+    FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES user_tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_photo_user_tags_tag ON photo_user_tags(tag_id);
+
+-- Albums: collections of photos
+CREATE TABLE IF NOT EXISTS albums (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    cover_photo_id INTEGER,  -- Photo to use as album cover
+    is_smart INTEGER DEFAULT 0,  -- 1 if album uses tag filter rules
+    filter_tags TEXT,  -- JSON array of tag IDs for smart albums
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (cover_photo_id) REFERENCES photos(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_albums_name ON albums(name);
+
+-- Manual album membership (for non-smart albums)
+CREATE TABLE IF NOT EXISTS album_photos (
+    album_id INTEGER NOT NULL,
+    photo_id INTEGER NOT NULL,
+    position INTEGER DEFAULT 0,  -- For manual ordering
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (album_id, photo_id),
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_album_photos_album ON album_photos(album_id);
 "#;
+
+/// Migration statements for existing databases.
+/// These add columns that may not exist in older database versions.
+pub const MIGRATIONS: &[&str] = &[
+    // Add exif_orientation column (v0.2.0)
+    "ALTER TABLE photos ADD COLUMN exif_orientation INTEGER DEFAULT 1",
+    // Add user_rotation column (v0.2.0)
+    "ALTER TABLE photos ADD COLUMN user_rotation INTEGER DEFAULT 0",
+];

@@ -35,51 +35,65 @@ fn ensure_model(filename: &str, url: &str) -> Result<PathBuf> {
     let model_path = models_dir.join(filename);
 
     if !model_path.exists() {
-        eprintln!("Downloading {}...", filename);
+        tracing::info!(model = %filename, "Downloading model...");
         let response = ureq::get(url)
             .call()
             .map_err(|e| anyhow!("Failed to download model: {}", e))?;
 
         let mut file = std::fs::File::create(&model_path)?;
         std::io::copy(&mut response.into_reader(), &mut file)?;
-        eprintln!("Downloaded {} to {:?}", filename, model_path);
+        tracing::info!(model = %filename, path = ?model_path, "Model downloaded");
     }
 
     Ok(model_path)
 }
 
-/// Initialize face detection models
-pub fn init_models() -> Result<()> {
+/// Initialize face detection model only (fast - just UltraFace)
+pub fn init_detection_model() -> Result<()> {
+    if DETECTION_MODEL.get().is_some() {
+        return Ok(());
+    }
+
     // UltraFace model for detection (320x240 version - fast)
-    // Source: https://github.com/onnx/models/tree/main/validated/vision/body_analysis/ultraface
     let detection_model_path = ensure_model(
         "ultraface-320.onnx",
         "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx"
     )?;
 
-    // ArcFace model for embeddings
-    // Source: https://github.com/onnx/models/tree/main/validated/vision/body_analysis/arcface
-    let embedding_model_path = ensure_model(
-        "arcface-resnet100.onnx",
-        "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-11-int8.onnx"
-    )?;
-
-    // Initialize detection model with multi-threading
     let detection_session = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .with_intra_threads(4)?
         .commit_from_file(&detection_model_path)?;
 
     let _ = DETECTION_MODEL.set(Mutex::new(detection_session));
+    Ok(())
+}
 
-    // Initialize embedding model with multi-threading
+/// Initialize face embedding model (slower - ArcFace ResNet100)
+fn init_embedding_model() -> Result<()> {
+    if EMBEDDING_MODEL.get().is_some() {
+        return Ok(());
+    }
+
+    // ArcFace model for embeddings
+    let embedding_model_path = ensure_model(
+        "arcface-resnet100.onnx",
+        "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-11-int8.onnx"
+    )?;
+
     let embedding_session = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .with_intra_threads(4)?
         .commit_from_file(&embedding_model_path)?;
 
     let _ = EMBEDDING_MODEL.set(Mutex::new(embedding_session));
+    Ok(())
+}
 
+/// Initialize both face detection models (for backwards compatibility)
+pub fn init_models() -> Result<()> {
+    init_detection_model()?;
+    init_embedding_model()?;
     Ok(())
 }
 
@@ -88,16 +102,30 @@ pub fn models_initialized() -> bool {
     DETECTION_MODEL.get().is_some() && EMBEDDING_MODEL.get().is_some()
 }
 
-/// Detect faces in an image file
+/// Check if detection model is initialized
+pub fn detection_model_initialized() -> bool {
+    DETECTION_MODEL.get().is_some()
+}
+
+/// Detect faces in an image file (with embeddings - slower)
 pub fn detect_faces(image_path: &Path) -> Result<Vec<DetectedFace>> {
     if !models_initialized() {
         init_models()?;
     }
 
-    // Use fast JPEG loading with downscaling for detection
     let img = load_image_for_detection(image_path)?;
-
     detect_faces_in_image(&img)
+}
+
+/// Detect faces in an image file (fast mode - no embeddings)
+/// Use this for initial scanning, then generate embeddings later when needed
+pub fn detect_faces_fast(image_path: &Path) -> Result<Vec<DetectedFace>> {
+    if !detection_model_initialized() {
+        init_detection_model()?;
+    }
+
+    let img = load_image_for_detection(image_path)?;
+    detect_faces_only(&img)
 }
 
 /// Load image optimized for face detection
@@ -105,20 +133,27 @@ fn load_image_for_detection(path: &Path) -> Result<DynamicImage> {
     image::open(path).map_err(|e| anyhow!("Failed to load image: {}", e))
 }
 
-/// Detect faces in a DynamicImage
+/// Detect faces in a DynamicImage (with embeddings - slower)
 pub fn detect_faces_in_image(img: &DynamicImage) -> Result<Vec<DetectedFace>> {
-    if !models_initialized() {
-        init_models()?;
+    detect_faces_in_image_impl(img, true)
+}
+
+/// Detect faces without generating embeddings (fast mode)
+pub fn detect_faces_only(img: &DynamicImage) -> Result<Vec<DetectedFace>> {
+    detect_faces_in_image_impl(img, false)
+}
+
+/// Internal implementation with optional embedding generation
+fn detect_faces_in_image_impl(img: &DynamicImage, generate_embeddings: bool) -> Result<Vec<DetectedFace>> {
+    // Always need detection model
+    if DETECTION_MODEL.get().is_none() {
+        init_detection_model()?;
     }
 
     let mut detection_model = DETECTION_MODEL.get()
         .ok_or_else(|| anyhow!("Detection model not initialized"))?
         .lock()
         .map_err(|e| anyhow!("Failed to lock detection model: {}", e))?;
-    let mut embedding_model = EMBEDDING_MODEL.get()
-        .ok_or_else(|| anyhow!("Embedding model not initialized"))?
-        .lock()
-        .map_err(|e| anyhow!("Failed to lock embedding model: {}", e))?;
 
     let (orig_width, orig_height) = img.dimensions();
 
@@ -128,6 +163,29 @@ pub fn detect_faces_in_image(img: &DynamicImage) -> Result<Vec<DetectedFace>> {
     if face_boxes.is_empty() {
         return Ok(Vec::new());
     }
+
+    // If not generating embeddings, return faces with empty embeddings
+    if !generate_embeddings {
+        return Ok(face_boxes
+            .into_iter()
+            .filter(|(bbox, _)| bbox.width > 0 && bbox.height > 0)
+            .map(|(bbox, confidence)| DetectedFace {
+                bbox,
+                embedding: Vec::new(), // Empty - will be generated later if needed
+                confidence,
+            })
+            .collect());
+    }
+
+    // Generate embeddings (slower path)
+    if EMBEDDING_MODEL.get().is_none() {
+        init_embedding_model()?;
+    }
+
+    let mut embedding_model = EMBEDDING_MODEL.get()
+        .ok_or_else(|| anyhow!("Embedding model not initialized"))?
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock embedding model: {}", e))?;
 
     let mut detected_faces = Vec::new();
 
@@ -381,6 +439,35 @@ pub fn faces_match(embedding_a: &[f32], embedding_b: &[f32], threshold: f32) -> 
 
 /// Default matching threshold for normalized embeddings (cosine similarity)
 pub const DEFAULT_MATCH_THRESHOLD: f32 = 0.5;
+
+/// Generate embedding for an existing face (given image path and bounding box)
+/// This is used for on-demand embedding generation when clustering
+pub fn generate_embedding_for_face(image_path: &Path, bbox: &BoundingBox) -> Result<Vec<f32>> {
+    // Initialize embedding model if needed
+    if EMBEDDING_MODEL.get().is_none() {
+        init_embedding_model()?;
+    }
+
+    let img = load_image_for_detection(image_path)?;
+    let (orig_width, orig_height) = img.dimensions();
+
+    // Crop face region
+    let face_crop = crop_face(&img, bbox, orig_width, orig_height);
+
+    // Get embedding model
+    let mut embedding_model = EMBEDDING_MODEL.get()
+        .ok_or_else(|| anyhow!("Embedding model not initialized"))?
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock embedding model: {}", e))?;
+
+    // Generate embedding
+    run_arcface_embedding(&mut *embedding_model, &face_crop)
+}
+
+/// Initialize embedding model (public for on-demand use)
+pub fn ensure_embedding_model() -> Result<()> {
+    init_embedding_model()
+}
 
 #[cfg(test)]
 mod tests {

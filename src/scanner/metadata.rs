@@ -29,8 +29,93 @@ pub struct ImageMetadata {
     pub gps_latitude: Option<f64>,
     pub gps_longitude: Option<f64>,
 
+    // EXIF Orientation (1-8, where 1 = normal, 6 = rotated 90 CW, etc.)
+    pub orientation: Option<u16>,
+
     // Complete EXIF data as JSON string
     pub all_exif: Option<String>,
+}
+
+/// EXIF Orientation values
+/// 1 = Normal (no rotation)
+/// 2 = Horizontal flip
+/// 3 = Rotate 180
+/// 4 = Vertical flip
+/// 5 = Transpose (flip + rotate 90 CCW)
+/// 6 = Rotate 90 CW
+/// 7 = Transverse (flip + rotate 90 CW)
+/// 8 = Rotate 90 CCW
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImageOrientation {
+    #[default]
+    Normal = 1,
+    FlipHorizontal = 2,
+    Rotate180 = 3,
+    FlipVertical = 4,
+    Transpose = 5,
+    Rotate90CW = 6,
+    Transverse = 7,
+    Rotate90CCW = 8,
+}
+
+impl ImageOrientation {
+    pub fn from_exif(value: u16) -> Self {
+        match value {
+            1 => Self::Normal,
+            2 => Self::FlipHorizontal,
+            3 => Self::Rotate180,
+            4 => Self::FlipVertical,
+            5 => Self::Transpose,
+            6 => Self::Rotate90CW,
+            7 => Self::Transverse,
+            8 => Self::Rotate90CCW,
+            _ => Self::Normal,
+        }
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        *self as u16
+    }
+
+    /// Get the rotation angle in degrees (clockwise)
+    pub fn rotation_degrees(&self) -> i32 {
+        match self {
+            Self::Normal | Self::FlipHorizontal => 0,
+            Self::Rotate180 | Self::FlipVertical => 180,
+            Self::Transpose | Self::Rotate90CW => 90,
+            Self::Transverse | Self::Rotate90CCW => 270,
+        }
+    }
+
+    /// Rotate clockwise by 90 degrees
+    pub fn rotate_cw(&self) -> Self {
+        match self {
+            Self::Normal => Self::Rotate90CW,
+            Self::Rotate90CW => Self::Rotate180,
+            Self::Rotate180 => Self::Rotate90CCW,
+            Self::Rotate90CCW => Self::Normal,
+            // For flipped images, adjust accordingly
+            Self::FlipHorizontal => Self::Transverse,
+            Self::Transverse => Self::FlipVertical,
+            Self::FlipVertical => Self::Transpose,
+            Self::Transpose => Self::FlipHorizontal,
+        }
+    }
+
+    /// Rotate counter-clockwise by 90 degrees
+    pub fn rotate_ccw(&self) -> Self {
+        match self {
+            Self::Normal => Self::Rotate90CCW,
+            Self::Rotate90CCW => Self::Rotate180,
+            Self::Rotate180 => Self::Rotate90CW,
+            Self::Rotate90CW => Self::Normal,
+            // For flipped images
+            Self::FlipHorizontal => Self::Transpose,
+            Self::Transpose => Self::FlipVertical,
+            Self::FlipVertical => Self::Transverse,
+            Self::Transverse => Self::FlipHorizontal,
+        }
+    }
 }
 
 pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
@@ -105,6 +190,15 @@ pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
             // Date taken
             if let Some(field) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
                 metadata.taken_at = Some(field.display_value().to_string().trim_matches('"').to_string());
+            }
+
+            // Orientation
+            if let Some(field) = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
+                if let exif::Value::Short(ref v) = field.value {
+                    if let Some(&orientation) = v.first() {
+                        metadata.orientation = Some(orientation);
+                    }
+                }
             }
 
             // GPS coordinates

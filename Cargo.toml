@@ -5,6 +5,14 @@ edition = "2021"
 description = "A TUI photo management application"
 authors = ["Clepho Authors"]
 
+[[bin]]
+name = "clepho"
+path = "src/main.rs"
+
+[[bin]]
+name = "clepho-daemon"
+path = "src/bin/daemon.rs"
+
 [dependencies]
 # TUI
 ratatui = "0.29"
@@ -43,6 +51,14 @@ walkdir = "2"
 # Error handling
 anyhow = "1"
 thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tracing-journald = "0.3"
 
 # Directories
 dirs = "5"

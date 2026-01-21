@@ -1,11 +1,13 @@
 use anyhow::Result;
+use crossterm::event::{KeyCode, KeyModifiers};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default = "default_db_path")]
-    pub db_path: PathBuf,
+    #[serde(default)]
+    pub database: DatabaseConfig,
 
     #[serde(default)]
     pub llm: LlmConfig,
@@ -24,6 +26,443 @@ pub struct Config {
 
     #[serde(default)]
     pub schedule: ScheduleConfig,
+
+    #[serde(default)]
+    pub library: LibraryConfig,
+
+    #[serde(default)]
+    pub keybindings: KeyBindings,
+}
+
+/// Database backend type
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseType {
+    #[default]
+    Sqlite,
+    Postgresql,
+}
+
+/// Database configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseConfig {
+    /// Database backend type (sqlite or postgresql)
+    #[serde(default)]
+    pub backend: DatabaseType,
+
+    /// SQLite database path (used when backend = sqlite)
+    #[serde(default = "default_db_path")]
+    pub sqlite_path: PathBuf,
+
+    /// PostgreSQL connection string (used when backend = postgresql)
+    /// Example: "postgresql://user:password@localhost:5432/clepho"
+    #[serde(default)]
+    pub postgresql_url: Option<String>,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            backend: DatabaseType::default(),
+            sqlite_path: default_db_path(),
+            postgresql_url: None,
+        }
+    }
+}
+
+impl Config {
+    /// Get the database path for backwards compatibility
+    /// This returns the SQLite path, which is the default.
+    pub fn db_path(&self) -> &PathBuf {
+        &self.database.sqlite_path
+    }
+}
+
+/// Action that can be triggered by a keybinding
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Action {
+    // Navigation
+    MoveDown,
+    MoveUp,
+    GoParent,
+    EnterSelected,
+    GoToTop,
+    GoToBottom,
+    PageDown,
+    PageUp,
+    ScrollPreviewDown,
+    ScrollPreviewUp,
+    GoHome,
+
+    // Selection
+    ToggleSelection,
+    EnterVisualMode,
+    CancelOrClear,
+
+    // Actions
+    Scan,
+    FindDuplicates,
+    DescribeWithLlm,
+    BatchLlm,
+    DetectFaces,
+    ClusterFaces,
+    ClipEmbedding,
+    ViewTasks,
+    ViewTrash,
+    MoveFiles,
+    RenameFiles,
+    ExportDatabase,
+    SemanticSearch,
+    ManagePeople,
+    EditDescription,
+    ViewChanges,
+    OpenSchedule,
+    OpenGallery,
+    OpenTags,
+    OpenSlideshow,
+    CentraliseFiles,
+    RotateCW,
+    RotateCCW,
+    YankFiles,
+    PasteFiles,
+    DeleteFiles,
+    ShowHelp,
+    Quit,
+    // View filters
+    ToggleHidden,
+    ToggleShowAllFiles,
+    OpenExternal,
+}
+
+/// A keybinding specification in config
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum KeySpec {
+    /// Simple key like "j", "k", "Enter"
+    Simple(String),
+    /// Key with modifiers like "Ctrl+d"
+    WithModifiers(String),
+}
+
+impl KeySpec {
+    /// Parse a key specification string into KeyCode and KeyModifiers
+    pub fn parse(&self) -> Option<(KeyCode, KeyModifiers)> {
+        let s = match self {
+            KeySpec::Simple(s) => s,
+            KeySpec::WithModifiers(s) => s,
+        };
+
+        let parts: Vec<&str> = s.split('+').collect();
+        let mut modifiers = KeyModifiers::empty();
+        let key_part = parts.last()?;
+
+        // Parse modifiers
+        for part in &parts[..parts.len().saturating_sub(1)] {
+            match part.to_lowercase().as_str() {
+                "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
+                "alt" => modifiers |= KeyModifiers::ALT,
+                "shift" => modifiers |= KeyModifiers::SHIFT,
+                _ => {}
+            }
+        }
+
+        // Parse key
+        let key = match key_part.to_lowercase().as_str() {
+            "enter" | "return" => KeyCode::Enter,
+            "esc" | "escape" => KeyCode::Esc,
+            "space" => KeyCode::Char(' '),
+            "tab" => KeyCode::Tab,
+            "backspace" | "bs" => KeyCode::Backspace,
+            "delete" | "del" => KeyCode::Delete,
+            "up" => KeyCode::Up,
+            "down" => KeyCode::Down,
+            "left" => KeyCode::Left,
+            "right" => KeyCode::Right,
+            "home" => KeyCode::Home,
+            "end" => KeyCode::End,
+            "pageup" | "pgup" => KeyCode::PageUp,
+            "pagedown" | "pgdn" => KeyCode::PageDown,
+            "f1" => KeyCode::F(1),
+            "f2" => KeyCode::F(2),
+            "f3" => KeyCode::F(3),
+            "f4" => KeyCode::F(4),
+            "f5" => KeyCode::F(5),
+            "f6" => KeyCode::F(6),
+            "f7" => KeyCode::F(7),
+            "f8" => KeyCode::F(8),
+            "f9" => KeyCode::F(9),
+            "f10" => KeyCode::F(10),
+            "f11" => KeyCode::F(11),
+            "f12" => KeyCode::F(12),
+            s if s.len() == 1 => {
+                // Use original character to preserve case
+                let original_c = key_part.chars().next()?;
+                // Uppercase letters: crossterm reports KeyCode::Char('G') WITH KeyModifiers::SHIFT
+                // so we need to add SHIFT modifier to match the lookup
+                if original_c.is_ascii_uppercase() && !modifiers.contains(KeyModifiers::SHIFT) {
+                    modifiers |= KeyModifiers::SHIFT;
+                }
+                KeyCode::Char(original_c)
+            }
+            _ => return None,
+        };
+
+        Some((key, modifiers))
+    }
+}
+
+/// Keybinding configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyBindings {
+    // Navigation
+    #[serde(default = "default_move_down")]
+    pub move_down: Vec<KeySpec>,
+    #[serde(default = "default_move_up")]
+    pub move_up: Vec<KeySpec>,
+    #[serde(default = "default_go_parent")]
+    pub go_parent: Vec<KeySpec>,
+    #[serde(default = "default_enter_selected")]
+    pub enter_selected: Vec<KeySpec>,
+    #[serde(default = "default_go_to_bottom")]
+    pub go_to_bottom: Vec<KeySpec>,
+    #[serde(default = "default_page_down")]
+    pub page_down: Vec<KeySpec>,
+    #[serde(default = "default_page_up")]
+    pub page_up: Vec<KeySpec>,
+    #[serde(default = "default_scroll_preview_down")]
+    pub scroll_preview_down: Vec<KeySpec>,
+    #[serde(default = "default_scroll_preview_up")]
+    pub scroll_preview_up: Vec<KeySpec>,
+    #[serde(default = "default_go_home")]
+    pub go_home: Vec<KeySpec>,
+
+    // Selection
+    #[serde(default = "default_toggle_selection")]
+    pub toggle_selection: Vec<KeySpec>,
+    #[serde(default = "default_enter_visual_mode")]
+    pub enter_visual_mode: Vec<KeySpec>,
+
+    // Actions
+    #[serde(default = "default_scan")]
+    pub scan: Vec<KeySpec>,
+    #[serde(default = "default_find_duplicates")]
+    pub find_duplicates: Vec<KeySpec>,
+    #[serde(default = "default_describe_with_llm")]
+    pub describe_with_llm: Vec<KeySpec>,
+    #[serde(default = "default_batch_llm")]
+    pub batch_llm: Vec<KeySpec>,
+    #[serde(default = "default_detect_faces")]
+    pub detect_faces: Vec<KeySpec>,
+    #[serde(default = "default_cluster_faces")]
+    pub cluster_faces: Vec<KeySpec>,
+    #[serde(default = "default_clip_embedding")]
+    pub clip_embedding: Vec<KeySpec>,
+    #[serde(default = "default_view_tasks")]
+    pub view_tasks: Vec<KeySpec>,
+    #[serde(default = "default_view_trash")]
+    pub view_trash: Vec<KeySpec>,
+    #[serde(default = "default_move_files")]
+    pub move_files: Vec<KeySpec>,
+    #[serde(default = "default_rename_files")]
+    pub rename_files: Vec<KeySpec>,
+    #[serde(default = "default_export_database")]
+    pub export_database: Vec<KeySpec>,
+    #[serde(default = "default_semantic_search")]
+    pub semantic_search: Vec<KeySpec>,
+    #[serde(default = "default_manage_people")]
+    pub manage_people: Vec<KeySpec>,
+    #[serde(default = "default_edit_description")]
+    pub edit_description: Vec<KeySpec>,
+    #[serde(default = "default_view_changes")]
+    pub view_changes: Vec<KeySpec>,
+    #[serde(default = "default_open_schedule")]
+    pub open_schedule: Vec<KeySpec>,
+    #[serde(default = "default_open_gallery")]
+    pub open_gallery: Vec<KeySpec>,
+    #[serde(default = "default_open_tags")]
+    pub open_tags: Vec<KeySpec>,
+    #[serde(default = "default_open_slideshow")]
+    pub open_slideshow: Vec<KeySpec>,
+    #[serde(default = "default_centralise_files")]
+    pub centralise_files: Vec<KeySpec>,
+    #[serde(default = "default_rotate_cw")]
+    pub rotate_cw: Vec<KeySpec>,
+    #[serde(default = "default_rotate_ccw")]
+    pub rotate_ccw: Vec<KeySpec>,
+    #[serde(default = "default_yank_files")]
+    pub yank_files: Vec<KeySpec>,
+    #[serde(default = "default_paste_files")]
+    pub paste_files: Vec<KeySpec>,
+    #[serde(default = "default_delete_files")]
+    pub delete_files: Vec<KeySpec>,
+    #[serde(default = "default_show_help")]
+    pub show_help: Vec<KeySpec>,
+    #[serde(default = "default_quit")]
+    pub quit: Vec<KeySpec>,
+    #[serde(default = "default_toggle_hidden")]
+    pub toggle_hidden: Vec<KeySpec>,
+    #[serde(default = "default_toggle_show_all_files")]
+    pub toggle_show_all_files: Vec<KeySpec>,
+    #[serde(default = "default_open_external")]
+    pub open_external: Vec<KeySpec>,
+}
+
+// Default keybinding functions
+fn default_move_down() -> Vec<KeySpec> { vec![KeySpec::Simple("j".into()), KeySpec::Simple("Down".into())] }
+fn default_move_up() -> Vec<KeySpec> { vec![KeySpec::Simple("k".into()), KeySpec::Simple("Up".into())] }
+fn default_go_parent() -> Vec<KeySpec> { vec![KeySpec::Simple("h".into()), KeySpec::Simple("Left".into()), KeySpec::Simple("Backspace".into())] }
+fn default_enter_selected() -> Vec<KeySpec> { vec![KeySpec::Simple("l".into()), KeySpec::Simple("Right".into()), KeySpec::Simple("Enter".into())] }
+fn default_go_to_bottom() -> Vec<KeySpec> { vec![KeySpec::Simple("G".into())] }
+fn default_page_down() -> Vec<KeySpec> { vec![KeySpec::WithModifiers("Ctrl+f".into())] }
+fn default_page_up() -> Vec<KeySpec> { vec![KeySpec::WithModifiers("Ctrl+b".into())] }
+fn default_scroll_preview_down() -> Vec<KeySpec> { vec![KeySpec::Simple("}".into())] }
+fn default_scroll_preview_up() -> Vec<KeySpec> { vec![KeySpec::Simple("{".into())] }
+fn default_go_home() -> Vec<KeySpec> { vec![KeySpec::Simple("~".into())] }
+fn default_toggle_selection() -> Vec<KeySpec> { vec![KeySpec::Simple("Space".into())] }
+fn default_enter_visual_mode() -> Vec<KeySpec> { vec![KeySpec::Simple("V".into())] }
+fn default_scan() -> Vec<KeySpec> { vec![KeySpec::Simple("s".into())] }
+fn default_find_duplicates() -> Vec<KeySpec> { vec![KeySpec::Simple("d".into())] }
+fn default_describe_with_llm() -> Vec<KeySpec> { vec![KeySpec::Simple("D".into())] }
+fn default_batch_llm() -> Vec<KeySpec> { vec![KeySpec::Simple("P".into())] }
+fn default_detect_faces() -> Vec<KeySpec> { vec![KeySpec::Simple("F".into())] }
+fn default_cluster_faces() -> Vec<KeySpec> { vec![KeySpec::Simple("C".into())] }
+fn default_clip_embedding() -> Vec<KeySpec> { vec![KeySpec::Simple("I".into())] }
+fn default_view_tasks() -> Vec<KeySpec> { vec![KeySpec::Simple("T".into())] }
+fn default_view_trash() -> Vec<KeySpec> { vec![KeySpec::Simple("t".into())] }
+fn default_move_files() -> Vec<KeySpec> { vec![KeySpec::Simple("m".into())] }
+fn default_rename_files() -> Vec<KeySpec> { vec![KeySpec::Simple("R".into())] }
+fn default_export_database() -> Vec<KeySpec> { vec![KeySpec::Simple("E".into())] }
+fn default_semantic_search() -> Vec<KeySpec> { vec![KeySpec::Simple("/".into())] }
+fn default_manage_people() -> Vec<KeySpec> { vec![KeySpec::Simple("p".into())] }
+fn default_edit_description() -> Vec<KeySpec> { vec![KeySpec::Simple("e".into())] }
+fn default_view_changes() -> Vec<KeySpec> { vec![KeySpec::Simple("c".into())] }
+fn default_open_schedule() -> Vec<KeySpec> { vec![KeySpec::Simple("@".into())] }
+fn default_open_gallery() -> Vec<KeySpec> { vec![KeySpec::Simple("A".into())] }
+fn default_open_tags() -> Vec<KeySpec> { vec![KeySpec::Simple("b".into())] }
+fn default_open_slideshow() -> Vec<KeySpec> { vec![KeySpec::Simple("S".into())] }
+fn default_centralise_files() -> Vec<KeySpec> { vec![KeySpec::Simple("L".into())] }
+fn default_rotate_cw() -> Vec<KeySpec> { vec![KeySpec::Simple("]".into())] }
+fn default_rotate_ccw() -> Vec<KeySpec> { vec![KeySpec::Simple("[".into())] }
+fn default_yank_files() -> Vec<KeySpec> { vec![KeySpec::Simple("y".into())] }
+fn default_paste_files() -> Vec<KeySpec> { vec![KeySpec::Simple("Y".into())] }
+fn default_delete_files() -> Vec<KeySpec> { vec![KeySpec::Simple("Delete".into())] }
+fn default_show_help() -> Vec<KeySpec> { vec![KeySpec::Simple("?".into())] }
+fn default_quit() -> Vec<KeySpec> { vec![KeySpec::Simple("q".into())] }
+fn default_toggle_hidden() -> Vec<KeySpec> { vec![KeySpec::Simple("H".into())] }
+fn default_toggle_show_all_files() -> Vec<KeySpec> { vec![KeySpec::Simple(".".into())] }
+fn default_open_external() -> Vec<KeySpec> { vec![KeySpec::Simple("o".into())] }
+
+impl Default for KeyBindings {
+    fn default() -> Self {
+        Self {
+            move_down: default_move_down(),
+            move_up: default_move_up(),
+            go_parent: default_go_parent(),
+            enter_selected: default_enter_selected(),
+            go_to_bottom: default_go_to_bottom(),
+            page_down: default_page_down(),
+            page_up: default_page_up(),
+            scroll_preview_down: default_scroll_preview_down(),
+            scroll_preview_up: default_scroll_preview_up(),
+            go_home: default_go_home(),
+            toggle_selection: default_toggle_selection(),
+            enter_visual_mode: default_enter_visual_mode(),
+            scan: default_scan(),
+            find_duplicates: default_find_duplicates(),
+            describe_with_llm: default_describe_with_llm(),
+            batch_llm: default_batch_llm(),
+            detect_faces: default_detect_faces(),
+            cluster_faces: default_cluster_faces(),
+            clip_embedding: default_clip_embedding(),
+            view_tasks: default_view_tasks(),
+            view_trash: default_view_trash(),
+            move_files: default_move_files(),
+            rename_files: default_rename_files(),
+            export_database: default_export_database(),
+            semantic_search: default_semantic_search(),
+            manage_people: default_manage_people(),
+            edit_description: default_edit_description(),
+            view_changes: default_view_changes(),
+            open_schedule: default_open_schedule(),
+            open_gallery: default_open_gallery(),
+            open_tags: default_open_tags(),
+            open_slideshow: default_open_slideshow(),
+            centralise_files: default_centralise_files(),
+            rotate_cw: default_rotate_cw(),
+            rotate_ccw: default_rotate_ccw(),
+            yank_files: default_yank_files(),
+            paste_files: default_paste_files(),
+            delete_files: default_delete_files(),
+            show_help: default_show_help(),
+            quit: default_quit(),
+            toggle_hidden: default_toggle_hidden(),
+            toggle_show_all_files: default_toggle_show_all_files(),
+            open_external: default_open_external(),
+        }
+    }
+}
+
+impl KeyBindings {
+    /// Build a lookup map from (KeyCode, KeyModifiers) -> Action
+    pub fn build_action_map(&self) -> HashMap<(KeyCode, KeyModifiers), Action> {
+        let mut map = HashMap::new();
+
+        let bindings: Vec<(&[KeySpec], Action)> = vec![
+            (&self.move_down, Action::MoveDown),
+            (&self.move_up, Action::MoveUp),
+            (&self.go_parent, Action::GoParent),
+            (&self.enter_selected, Action::EnterSelected),
+            (&self.go_to_bottom, Action::GoToBottom),
+            (&self.page_down, Action::PageDown),
+            (&self.page_up, Action::PageUp),
+            (&self.scroll_preview_down, Action::ScrollPreviewDown),
+            (&self.scroll_preview_up, Action::ScrollPreviewUp),
+            (&self.go_home, Action::GoHome),
+            (&self.toggle_selection, Action::ToggleSelection),
+            (&self.enter_visual_mode, Action::EnterVisualMode),
+            (&self.scan, Action::Scan),
+            (&self.find_duplicates, Action::FindDuplicates),
+            (&self.describe_with_llm, Action::DescribeWithLlm),
+            (&self.batch_llm, Action::BatchLlm),
+            (&self.detect_faces, Action::DetectFaces),
+            (&self.cluster_faces, Action::ClusterFaces),
+            (&self.clip_embedding, Action::ClipEmbedding),
+            (&self.view_tasks, Action::ViewTasks),
+            (&self.view_trash, Action::ViewTrash),
+            (&self.move_files, Action::MoveFiles),
+            (&self.rename_files, Action::RenameFiles),
+            (&self.export_database, Action::ExportDatabase),
+            (&self.semantic_search, Action::SemanticSearch),
+            (&self.manage_people, Action::ManagePeople),
+            (&self.edit_description, Action::EditDescription),
+            (&self.view_changes, Action::ViewChanges),
+            (&self.open_schedule, Action::OpenSchedule),
+            (&self.open_gallery, Action::OpenGallery),
+            (&self.open_tags, Action::OpenTags),
+            (&self.open_slideshow, Action::OpenSlideshow),
+            (&self.centralise_files, Action::CentraliseFiles),
+            (&self.rotate_cw, Action::RotateCW),
+            (&self.rotate_ccw, Action::RotateCCW),
+            (&self.yank_files, Action::YankFiles),
+            (&self.paste_files, Action::PasteFiles),
+            (&self.delete_files, Action::DeleteFiles),
+            (&self.show_help, Action::ShowHelp),
+            (&self.quit, Action::Quit),
+            (&self.toggle_hidden, Action::ToggleHidden),
+            (&self.toggle_show_all_files, Action::ToggleShowAllFiles),
+            (&self.open_external, Action::OpenExternal),
+        ];
+
+        for (specs, action) in bindings {
+            for spec in specs {
+                if let Some((code, mods)) = spec.parse() {
+                    map.insert((code, mods), action);
+                }
+            }
+        }
+
+        map
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +558,47 @@ impl Default for ScheduleConfig {
     }
 }
 
+/// Operation mode for centralising files
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CentraliseOperation {
+    /// Copy files to library (keeps originals)
+    #[default]
+    Copy,
+    /// Move files to library (removes originals)
+    Move,
+}
+
+/// Configuration for file centralization/library management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryConfig {
+    /// Root path of the managed library
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+
+    /// Default operation mode (copy or move)
+    #[serde(default)]
+    pub operation: CentraliseOperation,
+
+    /// Maximum filename length (excluding extension)
+    #[serde(default = "default_max_filename_length")]
+    pub max_filename_length: usize,
+}
+
+fn default_max_filename_length() -> usize {
+    100
+}
+
+impl Default for LibraryConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            operation: CentraliseOperation::default(),
+            max_filename_length: default_max_filename_length(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProviderType {
@@ -142,6 +622,12 @@ pub struct LlmConfig {
 
     #[serde(default)]
     pub api_key: Option<String>,
+
+    /// Custom prompt/context for image descriptions.
+    /// This text will be prepended to the default prompt to provide context.
+    /// Example: "These photos are from a 1985 family reunion in Texas."
+    #[serde(default)]
+    pub custom_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,13 +735,15 @@ impl Default for ScannerConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            db_path: default_db_path(),
+            database: DatabaseConfig::default(),
             llm: LlmConfig::default(),
             scanner: ScannerConfig::default(),
             preview: PreviewConfig::default(),
             trash: TrashConfig::default(),
             thumbnails: ThumbnailConfig::default(),
             schedule: ScheduleConfig::default(),
+            library: LibraryConfig::default(),
+            keybindings: KeyBindings::default(),
         }
     }
 }
@@ -291,9 +779,13 @@ impl Config {
     }
 
     fn config_path() -> PathBuf {
+        Self::config_dir().join("config.toml")
+    }
+
+    /// Get the clepho configuration directory.
+    pub fn config_dir() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("clepho")
-            .join("config.toml")
     }
 }

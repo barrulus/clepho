@@ -424,6 +424,73 @@ impl Database {
         Ok(results)
     }
 
+    /// Get faces that don't have embeddings yet (for on-demand generation)
+    pub fn get_faces_without_embeddings(&self, limit: usize) -> Result<Vec<(i64, i64, BoundingBox)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, photo_id, bbox_x, bbox_y, bbox_w, bbox_h
+            FROM faces
+            WHERE embedding IS NULL
+            LIMIT ?
+            "#,
+        )?;
+
+        let results = stmt
+            .query_map([limit as i64], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    BoundingBox {
+                        x: row.get(2)?,
+                        y: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
+                    },
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(results)
+    }
+
+    /// Get photo path by ID
+    pub fn get_photo_path(&self, photo_id: i64) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT path FROM photos WHERE id = ?",
+            [photo_id],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(path) => Ok(Some(path)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Update a face's embedding
+    pub fn update_face_embedding(&self, face_id: i64, embedding: &[f32]) -> Result<()> {
+        let embedding_bytes = embedding_to_bytes(embedding);
+        let embedding_dim = embedding.len() as i32;
+
+        self.conn.execute(
+            "UPDATE faces SET embedding = ?, embedding_dim = ? WHERE id = ?",
+            params![embedding_bytes, embedding_dim, face_id],
+        )?;
+        Ok(())
+    }
+
+    /// Count faces without embeddings
+    pub fn count_faces_without_embeddings(&self) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM faces WHERE embedding IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     // ========================================================================
     // Face clusters (for auto-grouping before naming)
     // ========================================================================

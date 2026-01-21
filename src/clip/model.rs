@@ -85,14 +85,14 @@ fn ensure_model(filename: &str, url: &str) -> Result<PathBuf> {
     let model_path = models_dir.join(filename);
 
     if !model_path.exists() {
-        eprintln!("Downloading {}...", filename);
+        tracing::info!(model = %filename, "Downloading CLIP model...");
         let response = ureq::get(url)
             .call()
             .map_err(|e| anyhow!("Failed to download model: {}", e))?;
 
         let mut file = std::fs::File::create(&model_path)?;
         std::io::copy(&mut response.into_reader(), &mut file)?;
-        eprintln!("Downloaded {} to {:?}", filename, model_path);
+        tracing::info!(model = %filename, path = ?model_path, "CLIP model downloaded");
     }
 
     Ok(model_path)
@@ -104,11 +104,11 @@ fn init_visual_model() -> Result<()> {
         return Ok(());
     }
 
-    // Using OpenCLIP ViT-B/32 visual encoder
-    // This is a commonly available CLIP model with good performance
+    // Using Qdrant's CLIP ViT-B/32 visual encoder (ONNX)
+    // Source: https://huggingface.co/Qdrant/clip-ViT-B-32-vision
     let model_path = ensure_model(
-        "clip-vit-base-patch32-visual.onnx",
-        "https://huggingface.co/schirmer/clip-vit-base-patch32-onnx/resolve/main/visual.onnx"
+        "clip-vit-b32-vision.onnx",
+        "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx"
     )?;
 
     let session = Session::builder()?
@@ -126,9 +126,11 @@ fn init_text_model() -> Result<()> {
         return Ok(());
     }
 
+    // Using Qdrant's CLIP ViT-B/32 text encoder (ONNX)
+    // Source: https://huggingface.co/Qdrant/clip-ViT-B-32-text
     let model_path = ensure_model(
-        "clip-vit-base-patch32-text.onnx",
-        "https://huggingface.co/schirmer/clip-vit-base-patch32-onnx/resolve/main/text.onnx"
+        "clip-vit-b32-text.onnx",
+        "https://huggingface.co/Qdrant/clip-ViT-B-32-text/resolve/main/model.onnx"
     )?;
 
     let session = Session::builder()?

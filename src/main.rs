@@ -1,10 +1,12 @@
 mod app;
+mod centralise;
 mod clip;
 mod config;
 mod db;
 mod export;
 mod faces;
 mod llm;
+mod logging;
 mod scanner;
 mod schedule;
 mod tasks;
@@ -25,11 +27,14 @@ use config::Config;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging (uses journald on Linux, file fallback otherwise)
+    let _ = logging::init(Some(Config::config_dir().join("logs")));
+
     // Load configuration
     let config = Config::load()?;
 
     // Initialize database
-    let db = db::Database::open(&config.db_path)?;
+    let db = db::Database::open(&config.db_path())?;
     db.initialize()?;
 
     // Setup terminal

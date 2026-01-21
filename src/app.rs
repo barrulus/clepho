@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::config::Config;
+use crate::config::{Action, Config};
 use crate::db::{Database, ScheduledTaskType};
 use crate::llm::LlmClient;
 use crate::scanner::{detect_changes, ChangeDetectionResult, Scanner};
@@ -25,6 +25,11 @@ use crate::ui::schedule_dialog::ScheduleDialog;
 use crate::ui::search_dialog::SearchDialog;
 use crate::ui::people_dialog::PeopleDialog;
 use crate::ui::trash_dialog::TrashDialog;
+use crate::ui::edit_dialog::EditDescriptionDialog;
+use crate::ui::gallery::GalleryView;
+use crate::ui::tag_dialog::{TagDialog, TagDialogMode};
+use crate::ui::slideshow::SlideshowView;
+use crate::ui::centralise_dialog::{CentraliseDialog, CentraliseDialogMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -51,6 +56,13 @@ pub enum AppMode {
     ChangesViewing,
     Scheduling,
     OverdueDialog,
+    EditingDescription,
+    Gallery,
+    GalleryHelp,
+    Tagging,
+    Slideshow,
+    SlideshowHelp,
+    Centralising,
 }
 
 #[allow(dead_code)]
@@ -102,6 +114,23 @@ pub struct App {
     pub schedule_manager: ScheduleManager,
     pub schedule_dialog: Option<ScheduleDialog>,
     pub overdue_dialog: Option<OverdueDialog>,
+    // Clipboard for cut/paste operations
+    pub clipboard: Vec<PathBuf>,
+    // Edit description dialog
+    pub edit_dialog: Option<EditDescriptionDialog>,
+    // Gallery view
+    pub gallery_view: Option<GalleryView>,
+    // Tag dialog
+    pub tag_dialog: Option<TagDialog>,
+    // Slideshow view
+    pub slideshow_view: Option<SlideshowView>,
+    // Centralise dialog
+    pub centralise_dialog: Option<CentraliseDialog>,
+    // Action map for configurable keybindings
+    pub action_map: HashMap<(KeyCode, KeyModifiers), Action>,
+    // View filters
+    pub show_hidden: bool,
+    pub show_all_files: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +147,7 @@ impl App {
         let llm_client = LlmClient::new(&config.llm.endpoint, &config.llm.model);
         let image_preview = ImagePreviewState::new(config.preview.protocol, &config.thumbnails);
         let trash_manager = TrashManager::new(config.trash.clone());
+        let action_map = config.keybindings.build_action_map();
         let mut app = Self {
             config,
             db,
@@ -152,6 +182,15 @@ impl App {
             schedule_manager: ScheduleManager::new(),
             schedule_dialog: None,
             overdue_dialog: None,
+            clipboard: Vec::new(),
+            edit_dialog: None,
+            gallery_view: None,
+            tag_dialog: None,
+            slideshow_view: None,
+            centralise_dialog: None,
+            action_map,
+            show_hidden: false,
+            show_all_files: false,
         };
         app.load_directory(&current_dir)?;
 
@@ -218,15 +257,36 @@ impl App {
 
     fn read_directory(&self, path: &PathBuf) -> Result<Vec<DirEntry>> {
         let mut entries = Vec::new();
+        let supported_extensions: Vec<String> = self.config.scanner.image_extensions
+            .iter()
+            .map(|e| e.to_lowercase())
+            .collect();
 
         if let Ok(read_dir) = std::fs::read_dir(path) {
             for entry in read_dir.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
                 let metadata = entry.metadata().ok();
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
                 let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
 
+                // Filter hidden files/directories (starting with .)
+                if !self.show_hidden && name.starts_with('.') {
+                    continue;
+                }
+
+                // Filter non-image files (unless show_all_files is enabled)
+                if !self.show_all_files && !is_dir {
+                    let ext = entry.path()
+                        .extension()
+                        .map(|e| e.to_string_lossy().to_lowercase())
+                        .unwrap_or_default();
+                    if !supported_extensions.contains(&ext) {
+                        continue;
+                    }
+                }
+
                 entries.push(DirEntry {
-                    name: entry.file_name().to_string_lossy().to_string(),
+                    name,
                     path: entry.path(),
                     is_dir,
                     size,
@@ -254,7 +314,7 @@ impl App {
                     self.status_message = Some(format!("{}: {}", prefix, completion.message));
 
                     // Clear metadata cache after scan completes so preview shows fresh data
-                    if matches!(completion.task_type, TaskType::Scan | TaskType::LlmSingle | TaskType::LlmBatch | TaskType::FaceDetection) {
+                    if matches!(completion.task_type, TaskType::Scan | TaskType::LlmSingle | TaskType::LlmBatch | TaskType::FaceDetection | TaskType::FaceClustering) {
                         self.image_preview.metadata_cache.clear();
                     }
                 } else {
@@ -275,6 +335,7 @@ impl App {
                         let area = Rect::new(0, 0, size.width, size.height);
                         match self.mode {
                             AppMode::PeopleManaging => self.handle_people_dialog_mouse(mouse, area)?,
+                            AppMode::Duplicates => self.handle_duplicates_mouse(mouse, area)?,
                             AppMode::Normal => self.handle_mouse(mouse, area)?,
                             _ => {} // Other modes don't have mouse support yet
                         }
@@ -366,6 +427,53 @@ impl App {
             return self.handle_overdue_dialog_key(key);
         }
 
+        // Handle EditingDescription mode
+        if self.mode == AppMode::EditingDescription {
+            return self.handle_edit_description_key(key);
+        }
+
+        // Handle Gallery Help mode
+        if self.mode == AppMode::GalleryHelp {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('?') => {
+                    self.mode = AppMode::Gallery;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // Handle Gallery mode
+        if self.mode == AppMode::Gallery {
+            return self.handle_gallery_key(key);
+        }
+
+        // Handle Tagging mode
+        if self.mode == AppMode::Tagging {
+            return self.handle_tag_dialog_key(key);
+        }
+
+        // Handle Slideshow Help mode
+        if self.mode == AppMode::SlideshowHelp {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('?') => {
+                    self.mode = AppMode::Slideshow;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // Handle Slideshow mode
+        if self.mode == AppMode::Slideshow {
+            return self.handle_slideshow_key(key);
+        }
+
+        // Handle Centralising mode
+        if self.mode == AppMode::Centralising {
+            return self.handle_centralise_key(key);
+        }
+
         // Handle Visual mode - j/k extends selection, Esc exits
         if self.mode == AppMode::Visual {
             match key.code {
@@ -391,10 +499,15 @@ impl App {
                     // In visual mode, Space also toggles through range
                     self.update_visual_selection();
                 }
-                KeyCode::Char('d') | KeyCode::Char('x') => {
-                    // Delete marked files (future feature)
-                    self.status_message = Some(format!("{} files selected", self.selected_files.len()));
+                KeyCode::Char('d') | KeyCode::Char('x') | KeyCode::Delete => {
+                    // Move selected files to trash
                     self.exit_visual_mode();
+                    self.trash_selected()?;
+                }
+                KeyCode::Char('y') => {
+                    // Yank (cut) selected files
+                    self.exit_visual_mode();
+                    self.yank_selected()?;
                 }
                 _ => {}
             }
@@ -422,69 +535,67 @@ impl App {
             }
         }
 
-        match key.code {
-            // Quit
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
+        // Special case: 'g' starts the gg sequence
+        if key.code == KeyCode::Char('g') && !key.modifiers.contains(KeyModifiers::SHIFT) {
+            self.g_pressed = true;
+            return Ok(());
+        }
+
+        // Special case: Ctrl+C always quits
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_quit = true;
+            return Ok(());
+        }
+
+        // Special case: Escape has complex behavior
+        if key.code == KeyCode::Esc {
+            if self.task_manager.has_running_tasks() {
+                if self.task_manager.cancel_most_recent() {
+                    self.status_message = Some("Task cancelled".to_string());
+                }
+            } else if !self.selected_files.is_empty() || self.mode == AppMode::Visual {
+                self.exit_visual_mode();
+                self.clear_selection();
             }
+            return Ok(());
+        }
 
-            // Help
-            KeyCode::Char('?') => self.mode = AppMode::Help,
+        // Look up action from configurable keybindings
+        let key_combo = (key.code, key.modifiers);
+        if let Some(&action) = self.action_map.get(&key_combo) {
+            self.execute_action(action)?;
+        }
 
-            // Scan current directory
-            KeyCode::Char('s') => self.start_scan()?,
+        Ok(())
+    }
 
-            // Find duplicates
-            KeyCode::Char('d') => self.find_duplicates()?,
-
-            // LLM describe selected image
-            KeyCode::Char('D') => self.describe_with_llm()?,
-
-            // Batch LLM processing for current directory
-            KeyCode::Char('P') => self.start_batch_llm()?,
-
+    /// Execute an action from the keybinding map
+    fn execute_action(&mut self, action: Action) -> Result<()> {
+        match action {
             // Navigation
-            KeyCode::Char('j') | KeyCode::Down => self.move_down(),
-            KeyCode::Char('k') | KeyCode::Up => self.move_up(),
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => self.go_parent()?,
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => self.enter_selected()?,
-
-            // Jump to top/bottom
-            KeyCode::Char('g') => self.g_pressed = true,
-            KeyCode::Char('G') => self.go_to_bottom(),
-
-            // Page navigation
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.page_down();
+            Action::MoveDown => self.move_down(),
+            Action::MoveUp => self.move_up(),
+            Action::GoParent => self.go_parent()?,
+            Action::EnterSelected => self.enter_selected()?,
+            Action::GoToTop => {
+                self.selected_index = 0;
+                self.scroll_offset = 0;
             }
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.page_up();
-            }
-
-            // Preview scroll ({ and } keys)
-            KeyCode::Char('{') => {
-                self.image_preview.scroll_up(3);
-            }
-            KeyCode::Char('}') => {
-                self.image_preview.scroll_down(3);
-            }
-
-            // Home directory
-            KeyCode::Char('~') => {
+            Action::GoToBottom => self.go_to_bottom(),
+            Action::PageDown => self.page_down(),
+            Action::PageUp => self.page_up(),
+            Action::ScrollPreviewDown => self.image_preview.scroll_down(3),
+            Action::ScrollPreviewUp => self.image_preview.scroll_up(3),
+            Action::GoHome => {
                 if let Some(home) = dirs::home_dir() {
                     self.load_directory(&home)?;
                 }
             }
 
-            // Multi-select: toggle selection with Space
-            KeyCode::Char(' ') => self.toggle_selection(),
-
-            // Visual mode: V to enter, select range
-            KeyCode::Char('V') => self.enter_visual_mode(),
-
-            // ESC: Cancel most recent running task, or clear selection
-            KeyCode::Esc => {
+            // Selection
+            Action::ToggleSelection => self.toggle_selection(),
+            Action::EnterVisualMode => self.enter_visual_mode(),
+            Action::CancelOrClear => {
                 if self.task_manager.has_running_tasks() {
                     if self.task_manager.cancel_most_recent() {
                         self.status_message = Some("Task cancelled".to_string());
@@ -495,47 +606,39 @@ impl App {
                 }
             }
 
-            // Move files
-            KeyCode::Char('m') => self.open_move_dialog()?,
-
-            // Rename files
-            KeyCode::Char('R') => self.open_rename_dialog()?,
-
-            // Export photos
-            KeyCode::Char('E') => self.open_export_dialog()?,
-
-            // Semantic search
-            KeyCode::Char('/') => self.open_search_dialog()?,
-
-            // Face detection on current directory
-            KeyCode::Char('F') => self.start_face_scan()?,
-
-            // CLIP embedding (image indexing)
-            KeyCode::Char('I') => self.start_clip_embedding()?,
-
-            // Face clustering
-            KeyCode::Char('C') => self.cluster_faces()?,
-
-            // People management dialog
-            KeyCode::Char('p') => self.open_people_dialog()?,
-
-            // Task list dialog
-            KeyCode::Char('T') => {
-                self.mode = AppMode::TaskList;
-            }
-
-            // Trash dialog
-            KeyCode::Char('t') => self.open_trash_dialog()?,
-
-            // Changes dialog (check/view file changes)
-            KeyCode::Char('c') => self.open_changes_dialog()?,
-
-            // Schedule dialog
-            KeyCode::Char('@') => self.open_schedule_dialog()?,
-
-            _ => {}
+            // Actions
+            Action::Scan => self.start_scan()?,
+            Action::FindDuplicates => self.find_duplicates()?,
+            Action::DescribeWithLlm => self.describe_with_llm()?,
+            Action::BatchLlm => self.start_batch_llm()?,
+            Action::DetectFaces => self.start_face_scan()?,
+            Action::ClusterFaces => self.cluster_faces()?,
+            Action::ClipEmbedding => self.start_clip_embedding()?,
+            Action::ViewTasks => self.mode = AppMode::TaskList,
+            Action::ViewTrash => self.open_trash_dialog()?,
+            Action::MoveFiles => self.open_move_dialog()?,
+            Action::RenameFiles => self.open_rename_dialog()?,
+            Action::ExportDatabase => self.open_export_dialog()?,
+            Action::SemanticSearch => self.open_search_dialog()?,
+            Action::ManagePeople => self.open_people_dialog()?,
+            Action::EditDescription => self.open_edit_description_dialog()?,
+            Action::ViewChanges => self.open_changes_dialog()?,
+            Action::OpenSchedule => self.open_schedule_dialog()?,
+            Action::OpenGallery => self.open_gallery_view()?,
+            Action::OpenTags => self.open_tag_dialog()?,
+            Action::OpenSlideshow => self.open_slideshow()?,
+            Action::CentraliseFiles => self.open_centralise_dialog()?,
+            Action::RotateCW => self.rotate_photo_cw()?,
+            Action::RotateCCW => self.rotate_photo_ccw()?,
+            Action::YankFiles => self.yank_selected()?,
+            Action::PasteFiles => self.paste_from_clipboard()?,
+            Action::DeleteFiles => self.trash_selected()?,
+            Action::ShowHelp => self.mode = AppMode::Help,
+            Action::Quit => self.should_quit = true,
+            Action::ToggleHidden => self.toggle_hidden()?,
+            Action::ToggleShowAllFiles => self.toggle_show_all_files()?,
+            Action::OpenExternal => self.open_external()?,
         }
-
         Ok(())
     }
 
@@ -846,7 +949,7 @@ impl App {
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::Scan);
         let dir = self.current_dir.clone();
         let config = self.config.clone();
-        let db_path = self.config.db_path.clone();
+        let db_path = self.config.db_path().clone();
 
         // Spawn scanning in a background thread
         std::thread::spawn(move || {
@@ -913,7 +1016,7 @@ impl App {
                 self.mode = AppMode::DuplicatesHelp;
             }
 
-            // Navigate photos within group
+            // Navigate photos within group (j/k or up/down)
             KeyCode::Char('j') | KeyCode::Down => {
                 if let Some(ref mut view) = self.duplicates_view {
                     view.next_photo();
@@ -925,13 +1028,13 @@ impl App {
                 }
             }
 
-            // Navigate between groups
-            KeyCode::Char('J') => {
+            // Navigate between groups (J/K or left/right)
+            KeyCode::Char('J') | KeyCode::Right => {
                 if let Some(ref mut view) = self.duplicates_view {
                     view.next_group();
                 }
             }
-            KeyCode::Char('K') => {
+            KeyCode::Char('K') | KeyCode::Left => {
                 if let Some(ref mut view) = self.duplicates_view {
                     view.prev_group();
                 }
@@ -1028,6 +1131,56 @@ impl App {
         Ok(())
     }
 
+    fn handle_duplicates_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Result<()> {
+        use crossterm::event::{MouseEventKind, MouseButton};
+
+        // Only handle left clicks
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return Ok(());
+        }
+
+        let view = match self.duplicates_view.as_mut() {
+            Some(v) => v,
+            None => return Ok(()),
+        };
+
+        // Calculate layout (matching render logic in duplicates.rs)
+        // Left 40% for groups, right 60% for photos
+        let left_width = (area.width * 40) / 100;
+        let right_start = left_width;
+
+        let mouse_x = mouse.column;
+        let mouse_y = mouse.row;
+
+        // Check if click is in the groups panel (left side)
+        if mouse_x < left_width {
+            // Account for border (1 pixel) and title (1 line)
+            let content_start_y = 2;
+            if mouse_y >= content_start_y {
+                let clicked_index = (mouse_y - content_start_y) as usize + view.group_scroll;
+                if clicked_index < view.groups.len() {
+                    view.current_group = clicked_index;
+                    view.selected_photo = 0;
+                }
+            }
+        }
+        // Check if click is in the photos panel (right side)
+        else if mouse_x >= right_start {
+            // Account for border (1 pixel) and title (1 line)
+            let content_start_y = 2;
+            if mouse_y >= content_start_y {
+                if let Some(group) = view.current_group() {
+                    let clicked_index = (mouse_y - content_start_y) as usize;
+                    if clicked_index < group.photos.len() {
+                        view.selected_photo = clicked_index;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn describe_with_llm(&mut self) -> Result<()> {
         // Check if we have a selected file that's an image
         let entry = match self.selected_entry() {
@@ -1048,7 +1201,7 @@ impl App {
         let path = entry.path.clone();
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
-        let db_path = self.config.db_path.clone();
+        let db_path = self.config.db_path().clone();
 
         // Spawn LLM request in background thread
         std::thread::spawn(move || {
@@ -1103,7 +1256,7 @@ impl App {
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmBatch);
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
-        let db_path = self.config.db_path.clone();
+        let db_path = self.config.db_path().clone();
 
         // Spawn batch processing in background thread
         std::thread::spawn(move || {
@@ -1316,7 +1469,7 @@ impl App {
                     Ok(_) => {
                         // Update database path
                         if let Err(e) = self.db.update_photo_path(source_path, &target_path) {
-                            eprintln!("Warning: Failed to update DB path: {}", e);
+                            tracing::warn!(error = %e, "Failed to update DB path");
                         }
                         moved += 1;
                     }
@@ -1339,7 +1492,7 @@ impl App {
                         }
                         // Update database path
                         if let Err(e) = self.db.update_photo_path(source_path, &target_path) {
-                            eprintln!("Warning: Failed to update DB path: {}", e);
+                            tracing::warn!(error = %e, "Failed to update DB path");
                         }
                         moved += 1;
                     }
@@ -1588,42 +1741,65 @@ impl App {
     }
 
     fn execute_semantic_search(&mut self) -> Result<()> {
-        let dialog = match self.search_dialog.as_mut() {
-            Some(d) => d,
+        // Extract query before borrowing dialog mutably
+        let query = match self.search_dialog.as_ref() {
+            Some(d) => d.query.clone(),
             None => return Ok(()),
         };
 
-        dialog.searching = true;
-        dialog.status = Some("Searching...".to_string());
+        // Update dialog status
+        if let Some(dialog) = self.search_dialog.as_mut() {
+            dialog.searching = true;
+            dialog.status = Some("Searching...".to_string());
+        }
 
-        let query = dialog.query.clone();
-
-        // Try embedding-based search if the provider supports it and we have embeddings
-        let results = if self.llm_client.supports_embeddings() {
-            // Try to get embedding for the query
-            match self.llm_client.get_text_embedding(&query) {
-                Ok(query_embedding) => {
-                    // Use vector similarity search
-                    match self.db.semantic_search(&query_embedding, 20, 0.3) {
-                        Ok(results) if !results.is_empty() => results,
-                        _ => {
-                            // Fallback to text search if no embedding results
-                            self.db.semantic_search_by_text(&query, 20)?
+        // Try CLIP embedding search first (local, no API needed)
+        let results = match self.try_clip_search(&query) {
+            Ok(results) if !results.is_empty() => {
+                // CLIP search succeeded
+                results
+            }
+            _ => {
+                // Fall back to LLM-based search
+                if self.llm_client.supports_embeddings() {
+                    match self.llm_client.get_text_embedding(&query) {
+                        Ok(query_embedding) => {
+                            match self.db.semantic_search(&query_embedding, 20, 0.3) {
+                                Ok(results) if !results.is_empty() => results,
+                                _ => self.db.semantic_search_by_text(&query, 20)?
+                            }
                         }
+                        Err(_) => self.db.semantic_search_by_text(&query, 20)?
                     }
-                }
-                Err(_) => {
-                    // Fallback to text search if embedding fails
+                } else {
                     self.db.semantic_search_by_text(&query, 20)?
                 }
             }
-        } else {
-            // Provider doesn't support embeddings, use text search
-            self.db.semantic_search_by_text(&query, 20)?
         };
 
-        dialog.set_results(results);
+        // Set results
+        if let Some(dialog) = self.search_dialog.as_mut() {
+            dialog.set_results(results);
+        }
         Ok(())
+    }
+
+    /// Try to search using CLIP embeddings (local, no API needed)
+    fn try_clip_search(&self, query: &str) -> Result<Vec<crate::db::SearchResult>> {
+        use crate::clip::ClipModel;
+
+        // Check if we have any CLIP embeddings
+        let embedding_count = self.db.count_embeddings()?;
+        if embedding_count == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Generate text embedding using CLIP
+        let clip = ClipModel::new();
+        let query_embedding = clip.embed_text(query)?;
+
+        // Search against stored CLIP embeddings
+        self.db.semantic_search(&query_embedding, 20, 0.2)
     }
 
     // --- Face scanning methods ---
@@ -1646,7 +1822,7 @@ impl App {
 
         let total = photos.len();
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::FaceDetection);
-        let db_path = self.config.db_path.clone();
+        let db_path = self.config.db_path().clone();
 
         // Spawn face scanning in background thread using dlib
         std::thread::spawn(move || {
@@ -1670,33 +1846,37 @@ impl App {
         Ok(())
     }
 
-    /// Cluster detected faces by similarity
+    /// Cluster detected faces by similarity (background task)
     fn cluster_faces(&mut self) -> Result<()> {
-        // Use a default threshold of 0.6 for face similarity
-        let threshold = 0.6;
+        use crate::tasks::TaskType;
 
-        match crate::faces::cluster_faces(&self.db, threshold) {
-            Ok(result) => {
-                if result.clusters_created == 0 {
-                    self.status_message = Some("No faces to cluster (run face detection first)".to_string());
-                } else {
-                    self.status_message = Some(format!(
-                        "Created {} clusters from {} faces{}",
-                        result.clusters_created,
-                        result.faces_clustered,
-                        if result.faces_skipped > 0 {
-                            format!(" ({} skipped, no embedding)", result.faces_skipped)
-                        } else {
-                            String::new()
-                        }
-                    ));
-                }
-            }
-            Err(e) => {
-                self.status_message = Some(format!("Clustering error: {}", e));
-            }
+        // Don't start if already clustering
+        if self.task_manager.is_running(TaskType::FaceClustering) {
+            self.status_message = Some("Face clustering already running".to_string());
+            return Ok(());
         }
 
+        // Use a default threshold of 0.6 for face similarity
+        let threshold = 0.6;
+        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::FaceClustering);
+        let db_path = self.config.db_path().clone();
+
+        // Spawn clustering in background thread
+        std::thread::spawn(move || {
+            let db = match crate::db::Database::open(&db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    let _ = tx.send(crate::tasks::TaskUpdate::Failed {
+                        error: format!("Failed to open database: {}", e),
+                    });
+                    return;
+                }
+            };
+
+            crate::faces::cluster_faces_background(&db, threshold, tx, cancel_flag);
+        });
+
+        self.status_message = Some("Clustering faces in background...".to_string());
         Ok(())
     }
 
@@ -1723,7 +1903,7 @@ impl App {
 
         let total = photos.len();
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::ClipEmbedding);
-        let db_path = self.config.db_path.clone();
+        let db_path = self.config.db_path().clone();
 
         // Spawn CLIP embedding in background thread
         std::thread::spawn(move || {
@@ -1777,13 +1957,13 @@ impl App {
                 match clip.embed_image_file(std::path::Path::new(path)) {
                     Ok(embedding) => {
                         if let Err(e) = db.store_embedding(*photo_id, &embedding, "clip-vit-base-patch32") {
-                            eprintln!("Failed to store embedding for {}: {}", path, e);
+                            tracing::error!(path = %path, error = %e, "Failed to store CLIP embedding");
                         } else {
                             processed += 1;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to generate embedding for {}: {}", path, e);
+                        tracing::error!(path = %path, error = %e, "Failed to generate CLIP embedding");
                     }
                 }
             }
@@ -1929,6 +2109,293 @@ impl App {
                     self.status_message = Some("No files older than limit".to_string());
                 }
             }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    // --- File operations (cut/paste/delete) ---
+
+    /// Move selected files to trash
+    fn trash_selected(&mut self) -> Result<()> {
+        let files_to_trash: Vec<PathBuf> = if self.selected_files.is_empty() {
+            // Use current selection
+            if let Some(entry) = self.selected_entry() {
+                if !entry.is_dir {
+                    vec![entry.path.clone()]
+                } else {
+                    self.status_message = Some("Cannot trash directories".to_string());
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+        } else {
+            // Use all selected files (filter out directories)
+            self.selected_files
+                .iter()
+                .filter(|p| p.is_file())
+                .cloned()
+                .collect()
+        };
+
+        if files_to_trash.is_empty() {
+            self.status_message = Some("No files selected".to_string());
+            return Ok(());
+        }
+
+        let mut trashed = 0;
+        let mut failed = 0;
+
+        for path in &files_to_trash {
+            // Get photo ID if it exists in database
+            let photo_id = self.db.get_photo_metadata(path).ok().flatten().map(|p| p.id);
+
+            match self.trash_manager.move_to_trash(path) {
+                Ok(trash_path) => {
+                    if let Some(id) = photo_id {
+                        if let Err(e) = self.db.mark_trashed(id, &trash_path) {
+                            tracing::error!(error = %e, path = ?path, "Failed to mark as trashed in DB");
+                        }
+                    }
+                    trashed += 1;
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, path = ?path, "Failed to move to trash");
+                    failed += 1;
+                }
+            }
+        }
+
+        // Refresh directory listing
+        self.load_directory(&self.current_dir.clone())?;
+        self.clear_selection();
+
+        if failed > 0 {
+            self.status_message = Some(format!("Trashed {} files, {} failed", trashed, failed));
+        } else {
+            self.status_message = Some(format!("Moved {} files to trash", trashed));
+        }
+
+        Ok(())
+    }
+
+    /// Yank (cut) selected files to clipboard
+    fn yank_selected(&mut self) -> Result<()> {
+        let files_to_yank: Vec<PathBuf> = if self.selected_files.is_empty() {
+            // Use current selection
+            if let Some(entry) = self.selected_entry() {
+                if !entry.is_dir {
+                    vec![entry.path.clone()]
+                } else {
+                    self.status_message = Some("Cannot cut directories".to_string());
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+        } else {
+            // Use all selected files (filter out directories)
+            self.selected_files
+                .iter()
+                .filter(|p| p.is_file())
+                .cloned()
+                .collect()
+        };
+
+        if files_to_yank.is_empty() {
+            self.status_message = Some("No files to cut".to_string());
+            return Ok(());
+        }
+
+        let count = files_to_yank.len();
+        self.clipboard = files_to_yank;
+        self.clear_selection();
+        self.status_message = Some(format!("{} files cut to clipboard", count));
+
+        Ok(())
+    }
+
+    /// Paste files from clipboard to current directory
+    fn paste_from_clipboard(&mut self) -> Result<()> {
+        if self.clipboard.is_empty() {
+            self.status_message = Some("Clipboard is empty".to_string());
+            return Ok(());
+        }
+
+        let target_dir = self.current_dir.clone();
+        let mut moved = 0;
+        let mut failed = 0;
+
+        for source_path in self.clipboard.drain(..).collect::<Vec<_>>() {
+            let filename = source_path.file_name().unwrap_or_default();
+            let target_path = target_dir.join(filename);
+
+            // Skip if source and target are the same
+            if source_path == target_path {
+                continue;
+            }
+
+            // Check if target exists
+            if target_path.exists() {
+                self.status_message = Some(format!("File already exists: {}", target_path.display()));
+                failed += 1;
+                continue;
+            }
+
+            // Try rename first (fast, same filesystem)
+            match std::fs::rename(&source_path, &target_path) {
+                Ok(_) => {
+                    // Update database path
+                    if let Err(e) = self.db.update_photo_path(&source_path, &target_path) {
+                        tracing::warn!(error = %e, "Failed to update DB path");
+                    }
+                    moved += 1;
+                }
+                Err(_) => {
+                    // Try copy + delete for cross-filesystem moves
+                    if let Err(e) = std::fs::copy(&source_path, &target_path) {
+                        tracing::error!(error = %e, "Failed to copy file");
+                        failed += 1;
+                        continue;
+                    }
+                    if let Err(e) = std::fs::remove_file(&source_path) {
+                        tracing::warn!(error = %e, "Copied but failed to delete original");
+                    }
+                    // Update database path
+                    if let Err(e) = self.db.update_photo_path(&source_path, &target_path) {
+                        tracing::warn!(error = %e, "Failed to update DB path");
+                    }
+                    moved += 1;
+                }
+            }
+        }
+
+        // Refresh directory listing
+        self.load_directory(&self.current_dir.clone())?;
+
+        if failed > 0 {
+            self.status_message = Some(format!("Moved {} files, {} failed", moved, failed));
+        } else if moved > 0 {
+            self.status_message = Some(format!("Pasted {} files", moved));
+        }
+
+        Ok(())
+    }
+
+    // --- Edit description dialog methods ---
+
+    fn open_edit_description_dialog(&mut self) -> Result<()> {
+        // Get selected photo
+        let entry = match self.selected_entry() {
+            Some(e) if !e.is_dir => e.clone(),
+            _ => {
+                self.status_message = Some("Select a photo first".to_string());
+                return Ok(());
+            }
+        };
+
+        // Get current description from database
+        let description = self.db.get_description(&entry.path)?;
+
+        self.edit_dialog = Some(EditDescriptionDialog::new(entry.path, description));
+        self.mode = AppMode::EditingDescription;
+        Ok(())
+    }
+
+    fn handle_edit_description_key(&mut self, key: KeyEvent) -> Result<()> {
+        let dialog = match self.edit_dialog.as_mut() {
+            Some(d) => d,
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        match key.code {
+            // Cancel editing
+            KeyCode::Esc => {
+                self.edit_dialog = None;
+                self.mode = AppMode::Normal;
+            }
+
+            // Save (Ctrl+Enter or Ctrl+S)
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let path = dialog.photo_path.clone();
+                let text = dialog.get_text().to_string();
+
+                if text.is_empty() {
+                    self.status_message = Some("Description cannot be empty".to_string());
+                } else {
+                    match self.db.save_description(&path, &text) {
+                        Ok(_) => {
+                            self.status_message = Some("Description saved".to_string());
+                            self.image_preview.metadata_cache.remove(&path);
+                            self.edit_dialog = None;
+                            self.mode = AppMode::Normal;
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Error saving: {}", e));
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let path = dialog.photo_path.clone();
+                let text = dialog.get_text().to_string();
+
+                if text.is_empty() {
+                    self.status_message = Some("Description cannot be empty".to_string());
+                } else {
+                    match self.db.save_description(&path, &text) {
+                        Ok(_) => {
+                            self.status_message = Some("Description saved".to_string());
+                            self.image_preview.metadata_cache.remove(&path);
+                            self.edit_dialog = None;
+                            self.mode = AppMode::Normal;
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Error saving: {}", e));
+                        }
+                    }
+                }
+            }
+
+            // Text editing
+            KeyCode::Backspace => dialog.backspace(),
+            KeyCode::Delete => dialog.delete(),
+            KeyCode::Left => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    dialog.move_cursor_word_left();
+                } else {
+                    dialog.move_cursor_left();
+                }
+            }
+            KeyCode::Right => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    dialog.move_cursor_word_right();
+                } else {
+                    dialog.move_cursor_right();
+                }
+            }
+            KeyCode::Home => dialog.move_cursor_home(),
+            KeyCode::End => dialog.move_cursor_end(),
+
+            // Clear text
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                dialog.clear();
+            }
+
+            // Revert to original
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                dialog.revert();
+            }
+
+            // Regular character input
+            KeyCode::Char(c) => dialog.handle_char(c),
+            KeyCode::Enter => dialog.handle_char('\n'),
+
             _ => {}
         }
 
@@ -2342,6 +2809,543 @@ impl App {
 
             // Mark as completed (the background task will report its own status)
             let _ = crate::schedule::mark_task_completed(task.id, &self.db);
+        }
+
+        Ok(())
+    }
+
+    // --- Gallery view ---
+
+    /// Open gallery view for current directory
+    fn open_gallery_view(&mut self) -> Result<()> {
+        // Collect image paths from current directory
+        let images: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir && is_image(&e.name))
+            .map(|e| e.path.clone())
+            .collect();
+
+        if images.is_empty() {
+            self.status_message = Some("No images in current directory".to_string());
+            return Ok(());
+        }
+
+        let gallery = GalleryView::new(
+            self.current_dir.clone(),
+            images,
+            self.config.preview.protocol,
+        );
+
+        self.gallery_view = Some(gallery);
+        self.mode = AppMode::Gallery;
+        Ok(())
+    }
+
+    /// Handle key events in gallery mode
+    fn handle_gallery_key(&mut self, key: KeyEvent) -> Result<()> {
+        let gallery = match self.gallery_view.as_mut() {
+            Some(g) => g,
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        // Store dimensions for navigation - use reasonable defaults
+        let columns = gallery.columns(120); // Approximate terminal width
+        let visible_rows = gallery.visible_rows(30); // Approximate terminal height
+
+        match key.code {
+            // Exit gallery
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.gallery_view = None;
+                self.mode = AppMode::Normal;
+            }
+
+            // Help
+            KeyCode::Char('?') => {
+                self.mode = AppMode::GalleryHelp;
+            }
+
+            // Navigation
+            KeyCode::Char('h') | KeyCode::Left => gallery.move_left(),
+            KeyCode::Char('l') | KeyCode::Right => gallery.move_right(),
+            KeyCode::Char('k') | KeyCode::Up => gallery.move_up(columns),
+            KeyCode::Char('j') | KeyCode::Down => gallery.move_down(columns),
+
+            // Jump to start/end
+            KeyCode::Char('g') => gallery.move_to_start(),
+            KeyCode::Char('G') => gallery.move_to_end(),
+
+            // Page navigation
+            KeyCode::PageUp => gallery.page_up(columns, visible_rows),
+            KeyCode::PageDown => gallery.page_down(columns, visible_rows),
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                gallery.page_up(columns, visible_rows);
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                gallery.page_down(columns, visible_rows);
+            }
+
+            // Thumbnail size
+            KeyCode::Char('+') | KeyCode::Char('=') => gallery.increase_size(),
+            KeyCode::Char('-') => gallery.decrease_size(),
+
+            // Sort options
+            KeyCode::Char('s') => gallery.cycle_sort(),
+
+            // Open selected in browser view
+            KeyCode::Enter => {
+                if let Some(path) = gallery.selected_image().cloned() {
+                    // Navigate to the image in normal mode
+                    if let Some(parent) = path.parent() {
+                        self.load_directory(&parent.to_path_buf())?;
+                        // Find and select the image
+                        if let Some(idx) = self.entries.iter().position(|e| e.path == path) {
+                            self.selected_index = idx;
+                        }
+                    }
+                    self.gallery_view = None;
+                    self.mode = AppMode::Normal;
+                }
+            }
+
+            _ => {}
+        }
+
+        // Ensure selection is visible after navigation
+        if let Some(g) = self.gallery_view.as_mut() {
+            g.ensure_visible(columns, visible_rows);
+        }
+
+        Ok(())
+    }
+
+    // --- Tag dialog ---
+
+    /// Open tag dialog for selected photo
+    fn open_tag_dialog(&mut self) -> Result<()> {
+        // Get selected image
+        let entry = match self.selected_entry() {
+            Some(e) if !e.is_dir && is_image(&e.name) => e.clone(),
+            _ => {
+                self.status_message = Some("Select an image to tag".to_string());
+                return Ok(());
+            }
+        };
+
+        // Get photo from database
+        let photo_id = match self.db.get_photo_metadata(&entry.path)? {
+            Some(meta) => meta.id,
+            None => {
+                self.status_message = Some("Photo not in database. Scan first.".to_string());
+                return Ok(());
+            }
+        };
+
+        // Get current tags and all tags
+        let current_tags = self.db.get_photo_tags(photo_id)?;
+        let all_tags = self.db.get_all_tags()?;
+
+        let dialog = TagDialog::new(entry.path.clone(), photo_id, current_tags, all_tags);
+        self.tag_dialog = Some(dialog);
+        self.mode = AppMode::Tagging;
+        Ok(())
+    }
+
+    /// Handle key events in tag dialog
+    fn handle_tag_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
+        let dialog = match self.tag_dialog.as_mut() {
+            Some(d) => d,
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        match dialog.mode {
+            TagDialogMode::ViewTags => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        self.tag_dialog = None;
+                        self.mode = AppMode::Normal;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => dialog.move_down(),
+                    KeyCode::Char('k') | KeyCode::Up => dialog.move_up(),
+                    KeyCode::Char('a') => dialog.enter_add_mode(),
+                    KeyCode::Char('d') | KeyCode::Delete => {
+                        // Delete selected tag from photo
+                        if let Some(tag) = dialog.selected_current_tag() {
+                            let tag_id = tag.id;
+                            let photo_id = dialog.photo_id;
+                            self.db.remove_tag_from_photo(photo_id, tag_id)?;
+                            // Refresh current tags
+                            if let Some(d) = self.tag_dialog.as_mut() {
+                                d.current_tags = self.db.get_photo_tags(photo_id)?;
+                                if d.selected_index >= d.current_tags.len() {
+                                    d.selected_index = d.current_tags.len().saturating_sub(1);
+                                }
+                            }
+                            self.status_message = Some("Tag removed".to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            TagDialogMode::AddTag => {
+                match key.code {
+                    KeyCode::Esc => dialog.enter_view_mode(),
+                    KeyCode::Char('j') | KeyCode::Down => dialog.move_down(),
+                    KeyCode::Char('k') | KeyCode::Up => dialog.move_up(),
+                    KeyCode::Backspace => dialog.backspace(),
+                    KeyCode::Enter => {
+                        // Add selected/new tag
+                        let photo_id = dialog.photo_id;
+                        let tag = if let Some(existing) = dialog.selected_suggestion() {
+                            existing.clone()
+                        } else if !dialog.input.is_empty() {
+                            // Create new tag
+                            self.db.get_or_create_tag(&dialog.input)?
+                        } else {
+                            return Ok(());
+                        };
+
+                        self.db.add_tag_to_photo(photo_id, tag.id)?;
+
+                        // Refresh
+                        if let Some(d) = self.tag_dialog.as_mut() {
+                            d.current_tags = self.db.get_photo_tags(photo_id)?;
+                            d.all_tags = self.db.get_all_tags()?;
+                            d.enter_view_mode();
+                        }
+                        self.status_message = Some(format!("Added tag: {}", tag.name));
+                    }
+                    KeyCode::Char(c) if !c.is_control() => dialog.handle_char(c),
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // --- Slideshow ---
+
+    /// Open slideshow for images in current directory
+    fn open_slideshow(&mut self) -> Result<()> {
+        use crate::ui::slideshow::SlideshowView;
+
+        // Collect all images in current directory
+        let images: Vec<std::path::PathBuf> = self
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir && is_image(&e.name))
+            .map(|e| e.path.clone())
+            .collect();
+
+        if images.is_empty() {
+            self.status_message = Some("No images in current directory".to_string());
+            return Ok(());
+        }
+
+        // Find the start index - either current selection or first image
+        let start_index = if let Some(entry) = self.selected_entry() {
+            if !entry.is_dir && is_image(&entry.name) {
+                images.iter().position(|p| p == &entry.path).unwrap_or(0)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        let mut slideshow = SlideshowView::new(
+            self.current_dir.clone(),
+            images,
+            self.config.preview.protocol,
+        );
+        slideshow.current = start_index;
+
+        self.slideshow_view = Some(slideshow);
+        self.mode = AppMode::Slideshow;
+        Ok(())
+    }
+
+    /// Handle key events in slideshow mode
+    fn handle_slideshow_key(&mut self, key: KeyEvent) -> Result<()> {
+        let slideshow = match self.slideshow_view.as_mut() {
+            Some(s) => s,
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        match key.code {
+            // Exit slideshow
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.slideshow_view = None;
+                self.mode = AppMode::Normal;
+            }
+
+            // Help
+            KeyCode::Char('?') => {
+                self.mode = AppMode::SlideshowHelp;
+            }
+
+            // Navigation
+            KeyCode::Char('h') | KeyCode::Left => slideshow.prev(),
+            KeyCode::Char('l') | KeyCode::Right => slideshow.next(),
+
+            // Jump to start/end
+            KeyCode::Char('g') => slideshow.first(),
+            KeyCode::Char('G') => slideshow.last(),
+
+            // Play/pause
+            KeyCode::Char(' ') => slideshow.toggle_play(),
+
+            // Speed control
+            KeyCode::Char('+') | KeyCode::Char('=') => slideshow.increase_interval(),
+            KeyCode::Char('-') => slideshow.decrease_interval(),
+
+            // Toggle display mode (fullscreen/presenter)
+            KeyCode::Char('v') => slideshow.toggle_display_mode(),
+
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    // --- Photo rotation ---
+
+    /// Rotate current photo clockwise by 90 degrees
+    fn rotate_photo_cw(&mut self) -> Result<()> {
+        // Get the currently selected photo
+        if let Some(entry) = self.entries.get(self.selected_index) {
+            if !entry.is_dir && is_image(&entry.name) {
+                match self.db.rotate_photo_cw(&entry.path) {
+                    Ok(new_rotation) => {
+                        self.status_message = Some(format!("Rotated to {}°", new_rotation));
+                        // Invalidate the image preview cache
+                        self.image_preview.invalidate_cache();
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Rotation failed: {}", e));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Rotate current photo counter-clockwise by 90 degrees
+    fn rotate_photo_ccw(&mut self) -> Result<()> {
+        // Get the currently selected photo
+        if let Some(entry) = self.entries.get(self.selected_index) {
+            if !entry.is_dir && is_image(&entry.name) {
+                match self.db.rotate_photo_ccw(&entry.path) {
+                    Ok(new_rotation) => {
+                        self.status_message = Some(format!("Rotated to {}°", new_rotation));
+                        // Invalidate the image preview cache
+                        self.image_preview.invalidate_cache();
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Rotation failed: {}", e));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // --- View filters ---
+
+    /// Toggle visibility of hidden files/directories (starting with .)
+    fn toggle_hidden(&mut self) -> Result<()> {
+        self.show_hidden = !self.show_hidden;
+        let state = if self.show_hidden { "shown" } else { "hidden" };
+        self.status_message = Some(format!("Hidden files: {}", state));
+        // Reload directory to apply filter
+        let current_dir = self.current_dir.clone();
+        self.load_directory(&current_dir)?;
+        Ok(())
+    }
+
+    /// Toggle between showing only supported image files vs all files
+    fn toggle_show_all_files(&mut self) -> Result<()> {
+        self.show_all_files = !self.show_all_files;
+        let state = if self.show_all_files { "all files" } else { "images only" };
+        self.status_message = Some(format!("Showing: {}", state));
+        // Reload directory to apply filter
+        let current_dir = self.current_dir.clone();
+        self.load_directory(&current_dir)?;
+        Ok(())
+    }
+
+    /// Open current file in system default viewer
+    fn open_external(&mut self) -> Result<()> {
+        if let Some(entry) = self.entries.get(self.selected_index) {
+            let path = &entry.path;
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("open")
+                    .arg(path)
+                    .spawn()?;
+            }
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &path.to_string_lossy()])
+                    .spawn()?;
+            }
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("xdg-open")
+                    .arg(path)
+                    .spawn()?;
+            }
+            self.status_message = Some(format!("Opened: {}", entry.name));
+        }
+        Ok(())
+    }
+
+    // --- Centralise files ---
+
+    /// Open centralise dialog for organizing files into library
+    fn open_centralise_dialog(&mut self) -> Result<()> {
+        // Check if library path is configured
+        let library_path = match self.config.library.path.clone() {
+            Some(p) => p,
+            None => {
+                self.status_message = Some(
+                    "Library path not configured. Set library.path in config.".to_string()
+                );
+                return Ok(());
+            }
+        };
+
+        // Get files to centralise - either selected files or current directory images
+        let source_files: Vec<PathBuf> = if !self.selected_files.is_empty() {
+            self.selected_files.iter().cloned().collect()
+        } else {
+            // All images in current directory
+            self.entries
+                .iter()
+                .filter(|e| !e.is_dir && is_image(&e.name))
+                .map(|e| e.path.clone())
+                .collect()
+        };
+
+        if source_files.is_empty() {
+            self.status_message = Some("No files to centralise".to_string());
+            return Ok(());
+        }
+
+        let dialog = CentraliseDialog::new(
+            library_path,
+            self.config.library.operation,
+            source_files,
+        );
+        self.centralise_dialog = Some(dialog);
+        self.mode = AppMode::Centralising;
+        Ok(())
+    }
+
+    /// Handle key events in centralise dialog
+    fn handle_centralise_key(&mut self, key: KeyEvent) -> Result<()> {
+        use crate::centralise::{preview_centralise, execute_centralise};
+
+        let dialog = match self.centralise_dialog.as_mut() {
+            Some(d) => d,
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        match dialog.mode {
+            CentraliseDialogMode::Configure => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        self.centralise_dialog = None;
+                        self.mode = AppMode::Normal;
+                    }
+                    KeyCode::Char('c') => {
+                        dialog.toggle_operation();
+                    }
+                    KeyCode::Enter => {
+                        // Generate preview
+                        match preview_centralise(
+                            &self.db,
+                            &dialog.library_path,
+                            &dialog.source_files,
+                            self.config.library.max_filename_length,
+                        ) {
+                            Ok(preview) => {
+                                dialog.preview = Some(preview);
+                                dialog.mode = CentraliseDialogMode::Preview;
+                                dialog.error = None;
+                            }
+                            Err(e) => {
+                                dialog.error = Some(e.to_string());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            CentraliseDialogMode::Preview => {
+                match key.code {
+                    KeyCode::Esc => {
+                        dialog.mode = CentraliseDialogMode::Configure;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => dialog.move_down(),
+                    KeyCode::Char('k') | KeyCode::Up => dialog.move_up(),
+                    KeyCode::PageDown => dialog.page_down(15),
+                    KeyCode::PageUp => dialog.page_up(15),
+                    KeyCode::Enter => {
+                        // Execute the operation
+                        if let Some(ref preview) = dialog.preview {
+                            dialog.mode = CentraliseDialogMode::Executing;
+                            match execute_centralise(&self.db, preview, dialog.operation) {
+                                Ok(result) => {
+                                    let success_count = result.succeeded.len();
+                                    dialog.result = Some(result);
+                                    dialog.mode = CentraliseDialogMode::Results;
+                                    self.status_message = Some(format!(
+                                        "Centralised {} files",
+                                        success_count
+                                    ));
+                                }
+                                Err(e) => {
+                                    dialog.mode = CentraliseDialogMode::Preview;
+                                    dialog.error = Some(e.to_string());
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            CentraliseDialogMode::Executing => {
+                // No key handling during execution
+            }
+            CentraliseDialogMode::Results => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                        // Clear selection since files may have moved
+                        self.selected_files.clear();
+                        self.centralise_dialog = None;
+                        self.mode = AppMode::Normal;
+                        // Refresh directory to reflect any moved files
+                        let dir = self.current_dir.clone();
+                        self.load_directory(&dir)?;
+                    }
+                    _ => {}
+                }
+            }
         }
 
         Ok(())

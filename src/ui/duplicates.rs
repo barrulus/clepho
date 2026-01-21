@@ -2,7 +2,10 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
+use ratatui_image::{Resize, StatefulImage};
+use std::path::PathBuf;
 
+use crate::app::App;
 use crate::db::{PhotoRecord, SimilarityGroup, calculate_quality_score};
 
 #[allow(dead_code)]
@@ -93,18 +96,42 @@ impl DuplicatesView {
     }
 }
 
-pub fn render(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
+pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
+    let view = match app.duplicates_view.as_ref() {
+        Some(v) => v,
+        None => return,
+    };
+
     // Clear and create overlay
     frame.render_widget(Clear, area);
 
-    // Split into left (group list) and right (photo details)
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(area);
+    // Check if image preview is available
+    let has_preview = app.config.preview.image_preview && app.image_preview.is_available();
 
-    render_group_list(frame, view, chunks[0]);
-    render_photo_details(frame, view, chunks[1]);
+    if has_preview {
+        // Three-column layout: groups | photos | preview
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(25),  // Groups
+                Constraint::Percentage(40),  // Photos
+                Constraint::Percentage(35),  // Preview
+            ])
+            .split(area);
+
+        render_group_list(frame, view, chunks[0]);
+        render_photo_list(frame, view, chunks[1]);
+        render_preview(frame, app, chunks[2]);
+    } else {
+        // Two-column layout (no preview)
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(area);
+
+        render_group_list(frame, view, chunks[0]);
+        render_photo_list(frame, view, chunks[1]);
+    }
 }
 
 fn render_group_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
@@ -125,8 +152,8 @@ fn render_group_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
             };
 
             ListItem::new(format!(
-                "{} {} Group {} ({} photos, {} marked)",
-                marker, type_icon, i + 1, count, marked
+                "{} {} Grp {} ({}/{})",
+                marker, type_icon, i + 1, marked, count
             ))
             .style(style)
         })
@@ -136,16 +163,16 @@ fn render_group_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Blue))
-            .title(format!(" Duplicate Groups ({}) ", view.groups.len())),
+            .title(format!(" Groups ({}) ", view.groups.len())),
     );
 
     frame.render_widget(list, area);
 }
 
-fn render_photo_details(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
+fn render_photo_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
     let inner_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .constraints([Constraint::Min(0), Constraint::Length(2)])
         .split(area);
 
     // Photo list for current group
@@ -157,7 +184,6 @@ fn render_photo_details(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
             .map(|(i, photo)| {
                 let marker = if i == view.selected_photo { ">" } else { " " };
                 let del_marker = if photo.marked_for_deletion { "[D]" } else { "   " };
-                let score = calculate_quality_score(photo);
 
                 let dims = match (photo.width, photo.height) {
                     (Some(w), Some(h)) => format!("{}x{}", w, h),
@@ -179,15 +205,15 @@ fn render_photo_details(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
                 };
 
                 ListItem::new(format!(
-                    "{} {} {} | {} | {} | score:{}",
-                    marker, del_marker, photo.filename, dims, size, score
+                    "{} {} {} {} {}",
+                    marker, del_marker, photo.filename, dims, size
                 ))
                 .style(style)
             })
             .collect();
 
         let title = format!(
-            " {} Duplicates ({}) ",
+            " {} ({}) [Space=toggle, a=auto] ",
             if group.group_type == "exact" { "Exact" } else { "Similar" },
             group.photos.len()
         );
@@ -222,9 +248,100 @@ fn render_photo_details(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
     }
 }
 
+fn render_preview(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Get current photo path
+    let photo_path = match app.duplicates_view.as_ref() {
+        Some(view) => match view.current_photo() {
+            Some(photo) => PathBuf::from(&photo.path),
+            None => {
+                render_no_preview(frame, area, "No photo selected");
+                return;
+            }
+        },
+        None => {
+            render_no_preview(frame, area, "No duplicates");
+            return;
+        }
+    };
+
+    // Split area for image and info
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(5)])
+        .split(area);
+
+    let image_area = chunks[0];
+    let info_area = chunks[1];
+
+    // Render image preview
+    let thumbnail_size = app.config.preview.thumbnail_size;
+    let rotation = app.db.get_photo_rotation(&photo_path).unwrap_or(0);
+
+    if let Some(protocol) = app.image_preview.load_image(&photo_path, thumbnail_size, rotation) {
+        let inner = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" Preview ");
+        let inner_area = inner.inner(image_area);
+        frame.render_widget(inner, image_area);
+
+        let image = StatefulImage::new(None).resize(Resize::Fit(None));
+        frame.render_stateful_widget(image, inner_area, protocol);
+    } else if app.image_preview.is_loading_image(&photo_path) {
+        render_no_preview(frame, image_area, "Loading...");
+    } else {
+        render_no_preview(frame, image_area, "Preview unavailable");
+    }
+
+    // Render photo info
+    let view = app.duplicates_view.as_ref().unwrap();
+    if let Some(photo) = view.current_photo() {
+        let score = calculate_quality_score(photo);
+        let dims = match (photo.width, photo.height) {
+            (Some(w), Some(h)) => format!("{}x{}", w, h),
+            _ => "unknown".to_string(),
+        };
+        let status = if photo.marked_for_deletion { "DELETE" } else { "KEEP" };
+        let status_color = if photo.marked_for_deletion { Color::Red } else { Color::Green };
+
+        let info_lines = vec![
+            Line::from(vec![
+                Span::raw("Status: "),
+                Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(format!("Size: {} | Dims: {}", format_size(photo.size_bytes as u64), dims)),
+            Line::from(format!("Quality score: {}", score)),
+        ];
+
+        let info = Paragraph::new(info_lines)
+            .block(Block::default().borders(Borders::ALL).title(" Info "));
+        frame.render_widget(info, info_area);
+    }
+}
+
+fn render_no_preview(frame: &mut Frame, area: Rect, message: &str) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(" Preview ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let msg = Paragraph::new(message)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+
+    // Center vertically
+    let y_offset = inner.height / 2;
+    if y_offset > 0 && inner.height > 1 {
+        let centered_area = Rect::new(inner.x, inner.y + y_offset, inner.width, 1);
+        frame.render_widget(msg, centered_area);
+    }
+}
+
 pub fn render_help(frame: &mut Frame, area: Rect) {
-    let dialog_width = 50.min(area.width.saturating_sub(4));
-    let dialog_height = 17.min(area.height.saturating_sub(4));
+    let dialog_width = 55.min(area.width.saturating_sub(4));
+    let dialog_height = 18.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -236,14 +353,15 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
     let help_text = vec![
         Line::from(Span::styled("Duplicates View", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
         Line::from(""),
-        Line::from("  j/k      Move between photos"),
-        Line::from("  J/K      Move between groups"),
-        Line::from("  Space    Toggle deletion mark"),
-        Line::from("  a        Auto-select (keep best)"),
-        Line::from("  x        Move marked to trash"),
-        Line::from("  X        Permanently delete marked"),
-        Line::from("  Esc      Exit duplicates view"),
-        Line::from("  ?        Toggle this help"),
+        Line::from("  j/k/Up/Down      Move between photos"),
+        Line::from("  J/K/Left/Right   Move between groups"),
+        Line::from("  Mouse click      Select group or photo"),
+        Line::from("  Space            Toggle deletion mark"),
+        Line::from("  a                Auto-select (keep best)"),
+        Line::from("  x                Move marked to trash"),
+        Line::from("  X                Permanently delete"),
+        Line::from("  Esc              Exit duplicates view"),
+        Line::from("  ?                Toggle this help"),
         Line::from(""),
         Line::from(Span::styled("Legend", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
         Line::from("  =        Exact duplicate (SHA256)"),

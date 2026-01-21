@@ -65,6 +65,21 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::Gray),
     ));
 
+    // Filter indicators
+    let mut filter_parts = Vec::new();
+    if app.show_hidden {
+        filter_parts.push(".*");
+    }
+    if app.show_all_files {
+        filter_parts.push("all");
+    }
+    if !filter_parts.is_empty() {
+        spans.push(Span::styled(
+            format!(" [{}] ", filter_parts.join(",")),
+            Style::default().fg(Color::Magenta),
+        ));
+    }
+
     // Task indicators (if any)
     if !task_indicators.is_empty() {
         spans.push(Span::styled(

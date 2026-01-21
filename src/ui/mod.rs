@@ -1,9 +1,14 @@
 mod browser;
+pub mod centralise_dialog;
 pub mod changes_dialog;
 mod dialogs;
 pub mod duplicates;
+pub mod edit_dialog;
 pub mod export_dialog;
+pub mod gallery;
 pub mod move_dialog;
+pub mod tag_dialog;
+pub mod slideshow;
 pub mod overdue_dialog;
 pub mod people_dialog;
 pub mod preview;
@@ -23,11 +28,27 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Handle duplicates view mode
     if app.mode == AppMode::Duplicates || app.mode == AppMode::DuplicatesHelp {
-        if let Some(ref view) = app.duplicates_view {
-            duplicates::render(frame, view, area);
-            if app.mode == AppMode::DuplicatesHelp {
-                duplicates::render_help(frame, area);
-            }
+        duplicates::render(frame, app, area);
+        if app.mode == AppMode::DuplicatesHelp {
+            duplicates::render_help(frame, area);
+        }
+        return;
+    }
+
+    // Handle gallery view mode
+    if app.mode == AppMode::Gallery || app.mode == AppMode::GalleryHelp {
+        gallery::render(frame, app, area);
+        if app.mode == AppMode::GalleryHelp {
+            gallery::render_help(frame, area);
+        }
+        return;
+    }
+
+    // Handle slideshow mode
+    if app.mode == AppMode::Slideshow || app.mode == AppMode::SlideshowHelp {
+        slideshow::render(frame, app, area);
+        if app.mode == AppMode::SlideshowHelp {
+            slideshow::render_help(frame, area);
         }
         return;
     }
@@ -108,6 +129,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         }
     }
 
+    // Render edit description dialog if in edit mode
+    if app.mode == AppMode::EditingDescription {
+        if let Some(ref dialog) = app.edit_dialog {
+            edit_dialog::render(frame, dialog, area);
+        }
+    }
+
     // Render changes dialog if in changes viewing mode
     if app.mode == AppMode::ChangesViewing {
         if let Some(ref dialog) = app.changes_dialog {
@@ -126,6 +154,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.mode == AppMode::OverdueDialog {
         if let Some(ref dialog) = app.overdue_dialog {
             overdue_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render tag dialog if in tagging mode
+    if app.mode == AppMode::Tagging {
+        if let Some(ref dialog) = app.tag_dialog {
+            tag_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render centralise dialog if in centralising mode
+    if app.mode == AppMode::Centralising {
+        if let Some(ref dialog) = app.centralise_dialog {
+            centralise_dialog::render(frame, dialog, area);
         }
     }
 }

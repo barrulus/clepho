@@ -37,6 +37,7 @@ pub enum TaskType {
     LlmSingle,
     LlmBatch,
     FaceDetection,
+    FaceClustering,
     ClipEmbedding,
 }
 
@@ -48,6 +49,7 @@ impl TaskType {
             TaskType::LlmSingle => "L",
             TaskType::LlmBatch => "B",
             TaskType::FaceDetection => "F",
+            TaskType::FaceClustering => "C",
             TaskType::ClipEmbedding => "E",
         }
     }
@@ -59,6 +61,7 @@ impl TaskType {
             TaskType::LlmSingle => "LLM Description",
             TaskType::LlmBatch => "LLM Batch Process",
             TaskType::FaceDetection => "Face Detection",
+            TaskType::FaceClustering => "Face Clustering",
             TaskType::ClipEmbedding => "CLIP Embedding",
         }
     }

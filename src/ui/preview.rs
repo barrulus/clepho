@@ -132,6 +132,14 @@ impl ImagePreviewState {
         self.metadata_cache.remove(path);
     }
 
+    /// Clear image cache for the current path (e.g., after rotation change)
+    pub fn invalidate_cache(&mut self) {
+        if let Some(ref path) = self.current_path.clone() {
+            self.image_cache.remove(path);
+            self.metadata_cache.remove(path);
+        }
+    }
+
     fn create_picker(protocol: ImageProtocol) -> Option<Picker> {
         match protocol {
             ImageProtocol::None => None,
@@ -142,7 +150,8 @@ impl ImagePreviewState {
     }
 
     /// Load an image for the given path asynchronously, returns cached if available
-    pub fn load_image(&mut self, path: &PathBuf, thumbnail_size: u32) -> Option<&mut StatefulProtocol> {
+    /// rotation_degrees: 0, 90, 180, or 270 degrees clockwise
+    pub fn load_image(&mut self, path: &PathBuf, thumbnail_size: u32, rotation_degrees: i32) -> Option<&mut StatefulProtocol> {
         // Poll for any completed loads first
         self.poll_async_loads();
 
@@ -161,23 +170,32 @@ impl ImagePreviewState {
             let path_clone = path.clone();
             let sender = self.image_sender.clone();
             let size = thumbnail_size;
+            let rotation = rotation_degrees;
 
             // Check for pre-generated thumbnail from scan
             let cached_thumb = self.thumbnail_manager.get_cached_path(path);
 
             std::thread::spawn(move || {
                 // Try to load from thumbnail cache first (much faster - small JPEG)
-                let load_result = if let Some(thumb_path) = cached_thumb {
-                    image::ImageReader::open(&thumb_path)
+                // Note: thumbnails don't have rotation applied, so we skip cache if rotated
+                let load_result = if cached_thumb.is_some() && rotation == 0 {
+                    image::ImageReader::open(cached_thumb.as_ref().unwrap())
                         .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
                 } else {
                     // Fall back to loading original and resizing
                     image::ImageReader::open(&path_clone)
                         .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                        .map(|img| img.resize(size, size, FilterType::Lanczos3))
+                        .map(|img| img.resize(size, size, FilterType::Triangle))
                 };
 
-                if let Ok(dyn_img) = load_result {
+                if let Ok(mut dyn_img) = load_result {
+                    // Apply rotation
+                    dyn_img = match rotation {
+                        90 => dyn_img.rotate90(),
+                        180 => dyn_img.rotate180(),
+                        270 => dyn_img.rotate270(),
+                        _ => dyn_img,
+                    };
                     let _ = sender.send((path_clone, dyn_img));
                 }
             });
@@ -361,7 +379,9 @@ fn render_image_preview(
 
         // Render image or loading indicator
         let thumbnail_size = app.config.preview.thumbnail_size;
-        if let Some(protocol) = app.image_preview.load_image(&entry.path, thumbnail_size) {
+        // Get rotation from database (combines EXIF + user rotation)
+        let rotation = app.db.get_photo_rotation(&entry.path).unwrap_or(0);
+        if let Some(protocol) = app.image_preview.load_image(&entry.path, thumbnail_size, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, chunks[0], protocol);
         } else if app.image_preview.is_loading_image(&entry.path) {

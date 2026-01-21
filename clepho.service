@@ -1,0 +1,38 @@
+[Unit]
+Description=Clepho Background Task Processor
+Documentation=https://github.com/barrulus/clepho
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/clepho-daemon
+Restart=on-failure
+RestartSec=10
+
+# Run as non-root user (recommended)
+# Uncomment and modify these lines for your setup:
+# User=clepho
+# Group=clepho
+
+# Environment
+Environment=RUST_LOG=info
+
+# Working directory (optional)
+# WorkingDirectory=/var/lib/clepho
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=50%
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+# Allow read/write to data directories
+ReadWritePaths=/home
+ReadWritePaths=/var/lib/clepho
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,6 @@
 mod schema;
+pub mod albums;
+pub mod backend;
 pub mod embeddings;
 pub mod faces;
 pub mod schedule;
@@ -9,11 +11,12 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
 
-pub use schema::SCHEMA;
+pub use schema::{SCHEMA, MIGRATIONS};
 pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
 pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, FaceWithPhoto, Person};
 pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
+pub use albums::{Album, UserTag};
 
 /// Full metadata for a photo from the database
 #[derive(Debug, Clone, Default)]
@@ -75,6 +78,18 @@ impl Database {
 
     pub fn initialize(&self) -> Result<()> {
         self.conn.execute_batch(SCHEMA)?;
+        self.run_migrations()?;
+        Ok(())
+    }
+
+    /// Run database migrations for existing databases.
+    /// These add columns that may not exist in older versions.
+    fn run_migrations(&self) -> Result<()> {
+        for migration in MIGRATIONS {
+            // Try to run each migration - they may fail if column already exists
+            // which is expected behavior for idempotent migrations
+            let _ = self.conn.execute(migration, []);
+        }
         Ok(())
     }
 
@@ -293,5 +308,97 @@ impl Database {
         results.truncate(limit);
 
         Ok(results)
+    }
+
+    /// Get the effective rotation for a photo (combines EXIF orientation and user rotation).
+    /// Returns rotation in degrees (0, 90, 180, 270).
+    pub fn get_photo_rotation(&self, path: &std::path::Path) -> Result<i32> {
+        let path_str = path.to_string_lossy();
+        let result = self.conn.query_row(
+            "SELECT exif_orientation, user_rotation FROM photos WHERE path = ?",
+            [path_str.as_ref()],
+            |row| {
+                let exif_orientation: i32 = row.get::<_, Option<i32>>(0)?.unwrap_or(1);
+                let user_rotation: i32 = row.get::<_, Option<i32>>(1)?.unwrap_or(0);
+                Ok((exif_orientation, user_rotation))
+            },
+        );
+
+        match result {
+            Ok((exif_orientation, user_rotation)) => {
+                // Convert EXIF orientation to degrees
+                let exif_degrees = match exif_orientation {
+                    6 => 90,   // Rotate 90 CW
+                    3 => 180,  // Rotate 180
+                    8 => 270,  // Rotate 90 CCW
+                    _ => 0,    // Normal or other values
+                };
+                // Combine with user rotation
+                Ok((exif_degrees + user_rotation) % 360)
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Set user rotation for a photo.
+    /// rotation should be 0, 90, 180, or 270 degrees.
+    pub fn set_user_rotation(&self, path: &std::path::Path, rotation: i32) -> Result<()> {
+        let path_str = path.to_string_lossy();
+        // Normalize rotation to 0, 90, 180, 270
+        let normalized = ((rotation % 360) + 360) % 360;
+        self.conn.execute(
+            "UPDATE photos SET user_rotation = ? WHERE path = ?",
+            rusqlite::params![normalized, path_str],
+        )?;
+        Ok(())
+    }
+
+    /// Rotate a photo clockwise by 90 degrees (adds to user rotation).
+    pub fn rotate_photo_cw(&self, path: &std::path::Path) -> Result<i32> {
+        let path_str = path.to_string_lossy();
+        let current: i32 = self.conn.query_row(
+            "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
+            [path_str.as_ref()],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        let new_rotation = (current + 90) % 360;
+        self.conn.execute(
+            "UPDATE photos SET user_rotation = ? WHERE path = ?",
+            rusqlite::params![new_rotation, path_str],
+        )?;
+
+        // Return effective rotation
+        self.get_photo_rotation(path)
+    }
+
+    /// Rotate a photo counter-clockwise by 90 degrees (subtracts from user rotation).
+    pub fn rotate_photo_ccw(&self, path: &std::path::Path) -> Result<i32> {
+        let path_str = path.to_string_lossy();
+        let current: i32 = self.conn.query_row(
+            "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
+            [path_str.as_ref()],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        let new_rotation = (current + 270) % 360; // +270 is same as -90
+        self.conn.execute(
+            "UPDATE photos SET user_rotation = ? WHERE path = ?",
+            rusqlite::params![new_rotation, path_str],
+        )?;
+
+        // Return effective rotation
+        self.get_photo_rotation(path)
+    }
+
+    /// Reset user rotation to 0 (rely on EXIF only).
+    pub fn reset_photo_rotation(&self, path: &std::path::Path) -> Result<()> {
+        let path_str = path.to_string_lossy();
+        self.conn.execute(
+            "UPDATE photos SET user_rotation = 0 WHERE path = ?",
+            [path_str],
+        )?;
+        Ok(())
     }
 }
