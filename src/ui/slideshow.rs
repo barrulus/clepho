@@ -14,6 +14,7 @@ use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use crate::app::App;
 use crate::config::ImageProtocol;
+use crate::db::Database;
 
 /// Slideshow display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -41,14 +42,14 @@ pub struct SlideshowView {
     pub display_mode: SlideshowDisplayMode,
     /// Image picker for protocol detection
     picker: Option<Picker>,
-    /// Cache of loaded images
-    image_cache: HashMap<PathBuf, StatefulProtocol>,
-    /// Images currently being loaded
-    loading: std::collections::HashSet<PathBuf>,
+    /// Cache of loaded images (keyed by "path#rotation")
+    image_cache: HashMap<String, StatefulProtocol>,
+    /// Images currently being loaded (keyed by "path#rotation")
+    loading: std::collections::HashSet<String>,
     /// Receiver for async image loading
-    receiver: Option<mpsc::Receiver<(PathBuf, DynamicImage)>>,
+    receiver: Option<mpsc::Receiver<(String, DynamicImage)>>,
     /// Sender for async image loading
-    sender: mpsc::Sender<(PathBuf, DynamicImage)>,
+    sender: mpsc::Sender<(String, DynamicImage)>,
     /// Source directory
     pub directory: PathBuf,
 }
@@ -83,11 +84,11 @@ impl SlideshowView {
     /// Poll for completed async image loads
     pub fn poll_async_loads(&mut self) {
         if let Some(ref receiver) = self.receiver {
-            while let Ok((path, dyn_img)) = receiver.try_recv() {
-                self.loading.remove(&path);
+            while let Ok((cache_key, dyn_img)) = receiver.try_recv() {
+                self.loading.remove(&cache_key);
                 if let Some(ref mut picker) = self.picker {
                     let protocol = picker.new_resize_protocol(dyn_img);
-                    self.image_cache.insert(path, protocol);
+                    self.image_cache.insert(cache_key, protocol);
                 }
             }
         }
@@ -187,27 +188,44 @@ impl SlideshowView {
         }
     }
 
+    /// Create a cache key that includes path and rotation
+    fn cache_key(path: &PathBuf, rotation: i32) -> String {
+        format!("{}#{}", path.display(), rotation)
+    }
+
     /// Load an image for display
-    pub fn load_image(&mut self, path: &PathBuf, max_size: u32) -> Option<&mut StatefulProtocol> {
+    /// rotation_degrees: 0, 90, 180, or 270 degrees clockwise
+    pub fn load_image(&mut self, path: &PathBuf, max_size: u32, rotation_degrees: i32) -> Option<&mut StatefulProtocol> {
         self.poll_async_loads();
 
+        let cache_key = Self::cache_key(path, rotation_degrees);
+
         // Check cache first
-        if self.image_cache.contains_key(path) {
-            return self.image_cache.get_mut(path);
+        if self.image_cache.contains_key(&cache_key) {
+            return self.image_cache.get_mut(&cache_key);
         }
 
         // Start async load if not already loading
-        if !self.loading.contains(path) && self.picker.is_some() {
-            self.loading.insert(path.clone());
+        if !self.loading.contains(&cache_key) && self.picker.is_some() {
+            self.loading.insert(cache_key.clone());
             let path_clone = path.clone();
             let sender = self.sender.clone();
+            let rotation = rotation_degrees;
 
             std::thread::spawn(move || {
                 if let Ok(img) = image::ImageReader::open(&path_clone)
                     .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
                 {
                     let resized = img.resize(max_size, max_size, FilterType::Lanczos3);
-                    let _ = sender.send((path_clone, resized));
+                    // Apply rotation
+                    let rotated = match rotation {
+                        90 => resized.rotate90(),
+                        180 => resized.rotate180(),
+                        270 => resized.rotate270(),
+                        _ => resized,
+                    };
+                    let cache_key = format!("{}#{}", path_clone.display(), rotation);
+                    let _ = sender.send((cache_key, rotated));
                 }
             });
         }
@@ -217,12 +235,15 @@ impl SlideshowView {
 
     /// Check if an image is currently loading
     pub fn is_loading(&self, path: &PathBuf) -> bool {
-        self.loading.contains(path)
+        // Check if any rotation variant is loading
+        self.loading.iter().any(|k| k.starts_with(&format!("{}#", path.display())))
     }
 }
 
 /// Render the slideshow view
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Borrow db separately to avoid borrow conflicts with slideshow_view
+    let db = &app.db;
     let slideshow = match app.slideshow_view.as_mut() {
         Some(s) => s,
         None => return,
@@ -235,12 +256,12 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Clear, area);
 
     match slideshow.display_mode {
-        SlideshowDisplayMode::Fullscreen => render_fullscreen(frame, slideshow, area),
-        SlideshowDisplayMode::Presenter => render_presenter(frame, slideshow, area),
+        SlideshowDisplayMode::Fullscreen => render_fullscreen(frame, slideshow, db, area),
+        SlideshowDisplayMode::Presenter => render_presenter(frame, slideshow, db, area),
     }
 }
 
-fn render_fullscreen(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rect) {
+fn render_fullscreen(frame: &mut Frame, slideshow: &mut SlideshowView, db: &Database, area: Rect) {
     // Main layout: image + status bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -254,7 +275,9 @@ fn render_fullscreen(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rec
             .style(Style::default().bg(Color::Black));
         frame.render_widget(block, chunks[0]);
 
-        if let Some(protocol) = slideshow.load_image(&path, 2048) {
+        // Get rotation from database (combines EXIF + user rotation)
+        let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+        if let Some(protocol) = slideshow.load_image(&path, 2048, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, chunks[0], protocol);
         } else if slideshow.is_loading(&path) {
@@ -269,7 +292,7 @@ fn render_fullscreen(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rec
     render_status_bar(frame, slideshow, chunks[1]);
 }
 
-fn render_presenter(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rect) {
+fn render_presenter(frame: &mut Frame, slideshow: &mut SlideshowView, db: &Database, area: Rect) {
     // Layout: preview strip at top + main image + status bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -281,7 +304,7 @@ fn render_presenter(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rect
         .split(area);
 
     // Render preview strip (prev | current | next)
-    render_preview_strip(frame, slideshow, chunks[0]);
+    render_preview_strip(frame, slideshow, db, chunks[0]);
 
     // Render current image
     if let Some(path) = slideshow.current_image().cloned() {
@@ -292,7 +315,9 @@ fn render_presenter(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rect
         let inner = block.inner(chunks[1]);
         frame.render_widget(block, chunks[1]);
 
-        if let Some(protocol) = slideshow.load_image(&path, 1024) {
+        // Get rotation from database (combines EXIF + user rotation)
+        let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+        if let Some(protocol) = slideshow.load_image(&path, 1024, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, inner, protocol);
         } else if slideshow.is_loading(&path) {
@@ -307,7 +332,7 @@ fn render_presenter(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rect
     render_status_bar(frame, slideshow, chunks[2]);
 }
 
-fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, area: Rect) {
+fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, db: &Database, area: Rect) {
     // Three-column layout for prev/current/next
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -327,7 +352,8 @@ fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, area: 
     frame.render_widget(prev_block, cols[0]);
 
     if let Some(path) = slideshow.prev_image().cloned() {
-        if let Some(protocol) = slideshow.load_image(&path, 256) {
+        let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+        if let Some(protocol) = slideshow.load_image(&path, 256, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, prev_inner, protocol);
         }
@@ -342,7 +368,8 @@ fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, area: 
     frame.render_widget(curr_block, cols[1]);
 
     if let Some(path) = slideshow.current_image().cloned() {
-        if let Some(protocol) = slideshow.load_image(&path, 256) {
+        let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+        if let Some(protocol) = slideshow.load_image(&path, 256, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, curr_inner, protocol);
         }
@@ -357,7 +384,8 @@ fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, area: 
     frame.render_widget(next_block, cols[2]);
 
     if let Some(path) = slideshow.next_image().cloned() {
-        if let Some(protocol) = slideshow.load_image(&path, 256) {
+        let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+        if let Some(protocol) = slideshow.load_image(&path, 256, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, next_inner, protocol);
         }
