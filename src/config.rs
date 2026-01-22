@@ -354,7 +354,7 @@ fn default_view_changes() -> Vec<KeySpec> { vec![KeySpec::Simple("c".into())] }
 fn default_open_schedule() -> Vec<KeySpec> { vec![KeySpec::Simple("@".into())] }
 fn default_open_gallery() -> Vec<KeySpec> { vec![KeySpec::Simple("A".into())] }
 fn default_open_tags() -> Vec<KeySpec> { vec![KeySpec::Simple("b".into())] }
-fn default_open_slideshow() -> Vec<KeySpec> { vec![KeySpec::Simple("S".into())] }
+fn default_open_slideshow() -> Vec<KeySpec> { vec![KeySpec::Simple("S".into()), KeySpec::Simple("v".into())] }
 fn default_centralise_files() -> Vec<KeySpec> { vec![KeySpec::Simple("L".into())] }
 fn default_rotate_cw() -> Vec<KeySpec> { vec![KeySpec::Simple("]".into())] }
 fn default_rotate_ccw() -> Vec<KeySpec> { vec![KeySpec::Simple("[".into())] }

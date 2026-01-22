@@ -263,10 +263,8 @@ impl GalleryView {
         }
     }
 
-    /// Load a thumbnail for the given path
+    /// Load a thumbnail for the given path (does NOT poll - call poll_async_loads first)
     pub fn load_thumbnail(&mut self, path: &PathBuf) -> Option<&mut StatefulProtocol> {
-        self.poll_async_loads();
-
         // Check cache first
         if self.thumbnail_cache.contains_key(path) {
             return self.thumbnail_cache.get_mut(path);
@@ -354,8 +352,8 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         None => return,
     };
 
-    // Clear background
-    frame.render_widget(Clear, area);
+    // Poll for completed thumbnail loads once per frame (not per cell)
+    gallery.poll_async_loads();
 
     // Calculate grid layout
     let columns = gallery.columns(area.width);
@@ -522,7 +520,7 @@ fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
         "No selection".to_string()
     };
 
-    let help = "Arrows:move | Enter:open | +/-:size | s:sort | Esc:exit | ?:help";
+    let help = "Arrows:move | v:view | Enter:open | +/-:size | s:sort | Esc:exit | ?:help";
 
     let footer_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -577,6 +575,7 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  G                Go to last"),
         Line::from("  PgUp/Ctrl+B      Page up"),
         Line::from("  PgDn/Ctrl+F      Page down"),
+        Line::from("  v/S              View image (slideshow)"),
         Line::from("  Enter            Open in browser"),
         Line::from("  +/=              Larger thumbnails"),
         Line::from("  -                Smaller thumbnails"),

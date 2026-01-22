@@ -30,6 +30,7 @@ use crate::ui::gallery::GalleryView;
 use crate::ui::tag_dialog::{TagDialog, TagDialogMode};
 use crate::ui::slideshow::SlideshowView;
 use crate::ui::centralise_dialog::{CentraliseDialog, CentraliseDialogMode};
+use crate::ui::confirm_dialog::ConfirmDialog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -63,6 +64,7 @@ pub enum AppMode {
     Slideshow,
     SlideshowHelp,
     Centralising,
+    Confirming,
 }
 
 #[allow(dead_code)]
@@ -126,6 +128,8 @@ pub struct App {
     pub slideshow_view: Option<SlideshowView>,
     // Centralise dialog
     pub centralise_dialog: Option<CentraliseDialog>,
+    // Confirm dialog for expensive tasks
+    pub confirm_dialog: Option<ConfirmDialog>,
     // Action map for configurable keybindings
     pub action_map: HashMap<(KeyCode, KeyModifiers), Action>,
     // View filters
@@ -191,6 +195,7 @@ impl App {
             tag_dialog: None,
             slideshow_view: None,
             centralise_dialog: None,
+            confirm_dialog: None,
             action_map,
             show_hidden,
             show_all_files,
@@ -477,6 +482,11 @@ impl App {
             return self.handle_centralise_key(key);
         }
 
+        // Handle Confirming mode
+        if self.mode == AppMode::Confirming {
+            return self.handle_confirm_dialog_key(key);
+        }
+
         // Handle Visual mode - j/k extends selection, Esc exits
         if self.mode == AppMode::Visual {
             match key.code {
@@ -609,14 +619,12 @@ impl App {
                 }
             }
 
-            // Actions
-            Action::Scan => self.start_scan()?,
+            // Actions requiring confirmation
+            Action::Scan | Action::DescribeWithLlm | Action::BatchLlm |
+            Action::DetectFaces | Action::ClusterFaces | Action::ClipEmbedding => {
+                self.show_confirmation(action);
+            }
             Action::FindDuplicates => self.find_duplicates()?,
-            Action::DescribeWithLlm => self.describe_with_llm()?,
-            Action::BatchLlm => self.start_batch_llm()?,
-            Action::DetectFaces => self.start_face_scan()?,
-            Action::ClusterFaces => self.cluster_faces()?,
-            Action::ClipEmbedding => self.start_clip_embedding()?,
             Action::ViewTasks => self.mode = AppMode::TaskList,
             Action::ViewTrash => self.open_trash_dialog()?,
             Action::MoveFiles => self.open_move_dialog()?,
@@ -2134,6 +2142,10 @@ impl App {
 
     /// Move selected files to trash
     fn trash_selected(&mut self) -> Result<()> {
+        // Save current position to restore after deletion
+        let saved_index = self.selected_index;
+        let original_count = self.entries.len();
+
         let files_to_trash: Vec<PathBuf> = if self.selected_files.is_empty() {
             // Use current selection
             if let Some(entry) = self.selected_entry() {
@@ -2186,6 +2198,22 @@ impl App {
         // Refresh directory listing
         self.load_directory(&self.current_dir.clone())?;
         self.clear_selection();
+
+        // Restore selection position: stay at same index or move to previous if at end
+        let new_count = self.entries.len();
+        if new_count > 0 {
+            let deleted_count = original_count.saturating_sub(new_count);
+            if saved_index >= new_count {
+                // Was at or near the end, select the new last item
+                self.selected_index = new_count.saturating_sub(1);
+            } else if deleted_count > 0 && saved_index > 0 {
+                // Select previous item (more intuitive when deleting)
+                self.selected_index = saved_index.saturating_sub(1);
+            } else {
+                // Keep same index (now points to next file)
+                self.selected_index = saved_index;
+            }
+        }
 
         if failed > 0 {
             self.status_message = Some(format!("Trashed {} files, {} failed", trashed, failed));
@@ -2921,6 +2949,25 @@ impl App {
             // Sort options
             KeyCode::Char('s') => gallery.cycle_sort(),
 
+            // View selected image in slideshow
+            KeyCode::Char('v') | KeyCode::Char('S') => {
+                use crate::ui::slideshow::SlideshowView;
+                let images = gallery.images.clone();
+                let selected = gallery.selected;
+                let directory = gallery.directory.clone();
+
+                if !images.is_empty() {
+                    let mut slideshow = SlideshowView::new(
+                        directory,
+                        images,
+                        self.config.preview.protocol,
+                    );
+                    slideshow.current = selected;
+                    self.slideshow_view = Some(slideshow);
+                    self.mode = AppMode::Slideshow;
+                }
+            }
+
             // Open selected in browser view
             KeyCode::Enter => {
                 if let Some(path) = gallery.selected_image().cloned() {
@@ -3381,6 +3428,45 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn handle_confirm_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                // User confirmed - execute the pending action
+                if let Some(dialog) = self.confirm_dialog.take() {
+                    self.mode = AppMode::Normal;
+                    self.execute_confirmed_action(dialog.action)?;
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                // User cancelled
+                self.confirm_dialog = None;
+                self.mode = AppMode::Normal;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Execute an action after confirmation (bypasses confirmation check)
+    fn execute_confirmed_action(&mut self, action: Action) -> Result<()> {
+        match action {
+            Action::Scan => self.start_scan()?,
+            Action::DescribeWithLlm => self.describe_with_llm()?,
+            Action::BatchLlm => self.start_batch_llm()?,
+            Action::DetectFaces => self.start_face_scan()?,
+            Action::ClusterFaces => self.cluster_faces()?,
+            Action::ClipEmbedding => self.start_clip_embedding()?,
+            _ => {} // Other actions don't need confirmation
+        }
+        Ok(())
+    }
+
+    /// Show a confirmation dialog for an expensive action
+    fn show_confirmation(&mut self, action: Action) {
+        self.confirm_dialog = Some(ConfirmDialog::new(action));
+        self.mode = AppMode::Confirming;
     }
 }
 

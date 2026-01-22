@@ -56,9 +56,12 @@ impl LlmQueue {
         tx: mpsc::Sender<TaskUpdate>,
         cancel_flag: Arc<AtomicBool>,
     ) {
+        const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
         let total = self.tasks.len();
         let mut processed = 0;
         let mut failed = 0;
+        let mut consecutive_failures = 0;
 
         let _ = tx.send(TaskUpdate::Started { total });
 
@@ -74,15 +77,37 @@ impl LlmQueue {
                 .unwrap_or_else(|| task.photo_path.to_string_lossy().to_string());
 
             let _ = tx.send(TaskUpdate::Progress(
-                TaskProgress::new(processed + 1, total).with_item(&filename)
+                TaskProgress::new(processed + failed + 1, total).with_item(&filename)
             ));
 
             match self.process_task(&task, db) {
-                Ok(_) => processed += 1,
+                Ok(_) => {
+                    processed += 1;
+                    consecutive_failures = 0; // Reset on success
+                }
                 Err(e) => {
                     failed += 1;
-                    // Continue processing other tasks despite errors
-                    tracing::error!(path = %task.photo_path.display(), error = %e, "LLM processing error");
+                    consecutive_failures += 1;
+
+                    // Only log the first few errors to avoid log spam
+                    if consecutive_failures <= MAX_CONSECUTIVE_FAILURES {
+                        tracing::error!(path = %task.photo_path.display(), error = %e, "LLM processing error");
+                    }
+
+                    // Abort if too many consecutive failures (likely server is down)
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        tracing::error!(
+                            consecutive_failures = consecutive_failures,
+                            "Aborting LLM batch: too many consecutive failures (server may be unavailable)"
+                        );
+                        let _ = tx.send(TaskUpdate::Completed {
+                            message: format!(
+                                "Aborted: LLM server unavailable ({} processed, {} failed)",
+                                processed, failed
+                            ),
+                        });
+                        return;
+                    }
                 }
             }
         }

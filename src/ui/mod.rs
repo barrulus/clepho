@@ -1,6 +1,7 @@
 mod browser;
 pub mod centralise_dialog;
 pub mod changes_dialog;
+pub mod confirm_dialog;
 mod dialogs;
 pub mod duplicates;
 pub mod edit_dialog;
@@ -168,6 +169,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.mode == AppMode::Centralising {
         if let Some(ref dialog) = app.centralise_dialog {
             centralise_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render confirm dialog if in confirming mode
+    if app.mode == AppMode::Confirming {
+        if let Some(ref dialog) = app.confirm_dialog {
+            confirm_dialog::render(frame, dialog, area);
         }
     }
 }

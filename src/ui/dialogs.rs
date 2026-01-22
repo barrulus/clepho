@@ -6,7 +6,7 @@ use ratatui::{
 pub fn render_help(frame: &mut Frame, area: Rect) {
     // Center the help dialog
     let dialog_width = 60.min(area.width.saturating_sub(4));
-    let dialog_height = 35.min(area.height.saturating_sub(4));
+    let dialog_height = 50.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -35,7 +35,17 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  V          Enter visual mode (range select)"),
         Line::from("  Esc        Cancel running task / clear selection"),
         Line::from(""),
-        Line::from(Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled("Views", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(""),
+        Line::from("  A          Open gallery view"),
+        Line::from("  v / S      View image (slideshow)"),
+        Line::from("  b          Open tags browser"),
+        Line::from("  T          View/manage running tasks"),
+        Line::from("  t          View/manage trash"),
+        Line::from("  c          View recent changes"),
+        Line::from("  @          Open schedule manager"),
+        Line::from(""),
+        Line::from(Span::styled("Processing", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
         Line::from(""),
         Line::from("  s          Scan current directory for photos"),
         Line::from("  d          Find duplicate photos"),
@@ -43,16 +53,25 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  P          Batch process all photos with AI"),
         Line::from("  F          Detect faces in photos"),
         Line::from("  C          Cluster similar faces together"),
-        Line::from("  T          View/manage running tasks"),
-        Line::from("  t          View/manage trash"),
+        Line::from("  I          Generate CLIP embeddings"),
+        Line::from(""),
+        Line::from(Span::styled("File Operations", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(""),
         Line::from("  m          Move selected/current file(s)"),
         Line::from("  R          Rename selected/current file(s)"),
+        Line::from("  y          Yank (cut) selected file(s)"),
+        Line::from("  Y          Paste yanked file(s)"),
+        Line::from("  L          Centralise files to target directory"),
         Line::from("  E          Export photo database"),
-        Line::from("  /          Semantic search photos"),
-        Line::from("  p          Manage people/faces"),
         Line::from("  ]          Rotate photo clockwise"),
         Line::from("  [          Rotate photo counter-clockwise"),
         Line::from("  o          Open file in system viewer"),
+        Line::from(""),
+        Line::from(Span::styled("Other", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(""),
+        Line::from("  /          Semantic search photos"),
+        Line::from("  p          Manage people/faces"),
+        Line::from("  e          Edit photo description"),
         Line::from("  H          Toggle hidden files/dirs"),
         Line::from("  .          Toggle show all files"),
         Line::from("  ?          Show this help"),
