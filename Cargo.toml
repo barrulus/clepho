@@ -77,3 +77,6 @@ ratatui-image = "3"
 
 # Export functionality
 csv = "1"
+
+[dev-dependencies]
+tempfile = "3"

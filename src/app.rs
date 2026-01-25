@@ -135,6 +135,9 @@ pub struct App {
     // View filters
     pub show_hidden: bool,
     pub show_all_files: bool,
+    // Flag to trigger full screen clear on next render
+    // Used when transitioning from views with terminal graphics (gallery/slideshow)
+    pub clear_on_next_render: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +202,7 @@ impl App {
             action_map,
             show_hidden,
             show_all_files,
+            clear_on_next_render: false,
         };
         app.load_directory(&current_dir)?;
 
@@ -1029,9 +1033,11 @@ impl App {
     fn handle_duplicates_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             // Exit duplicates view
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') => {
                 self.mode = AppMode::Normal;
                 self.duplicates_view = None;
+                // Force full screen clear to remove terminal graphics artifacts
+                self.clear_on_next_render = true;
             }
 
             // Help
@@ -2912,9 +2918,11 @@ impl App {
 
         match key.code {
             // Exit gallery
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') => {
                 self.gallery_view = None;
                 self.mode = AppMode::Normal;
+                // Force full screen clear to remove terminal graphics artifacts
+                self.clear_on_next_render = true;
             }
 
             // Help
@@ -2981,6 +2989,8 @@ impl App {
                     }
                     self.gallery_view = None;
                     self.mode = AppMode::Normal;
+                    // Force full screen clear to remove terminal graphics artifacts
+                    self.clear_on_next_render = true;
                 }
             }
 
@@ -3157,9 +3167,11 @@ impl App {
 
         match key.code {
             // Exit slideshow
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') => {
                 self.slideshow_view = None;
                 self.mode = AppMode::Normal;
+                // Force full screen clear to remove terminal graphics artifacts
+                self.clear_on_next_render = true;
             }
 
             // Help
@@ -3436,6 +3448,8 @@ impl App {
                 // User confirmed - execute the pending action
                 if let Some(dialog) = self.confirm_dialog.take() {
                     self.mode = AppMode::Normal;
+                    // Force redraw of any images behind the modal
+                    self.image_preview.invalidate_cache();
                     self.execute_confirmed_action(dialog.action)?;
                 }
             }
@@ -3443,6 +3457,8 @@ impl App {
                 // User cancelled
                 self.confirm_dialog = None;
                 self.mode = AppMode::Normal;
+                // Force redraw of any images behind the modal
+                self.image_preview.invalidate_cache();
             }
             _ => {}
         }

@@ -21,11 +21,21 @@ mod task_list_dialog;
 pub mod trash_dialog;
 
 use ratatui::prelude::*;
+use ratatui::widgets::Clear;
 
 use crate::app::{App, AppMode};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+
+    // If a full screen clear was requested (e.g., after exiting gallery/slideshow),
+    // clear the entire screen first to remove any terminal graphics artifacts.
+    // This is necessary because terminal image protocols (Sixel/Kitty) render
+    // graphics independently of the text buffer.
+    if app.clear_on_next_render {
+        frame.render_widget(Clear, area);
+        app.clear_on_next_render = false;
+    }
 
     // Handle duplicates view mode
     if app.mode == AppMode::Duplicates || app.mode == AppMode::DuplicatesHelp {
