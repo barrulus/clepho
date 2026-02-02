@@ -891,6 +891,9 @@ impl App {
             if entry.is_dir {
                 let path = entry.path.clone();
                 self.load_directory(&path)?;
+            } else {
+                // Open files in external viewer
+                self.open_external()?;
             }
         }
         Ok(())
@@ -3104,21 +3107,24 @@ impl App {
                 }
             }
 
-            // Open selected in browser view
+            // Open selected image in external viewer
             KeyCode::Enter => {
                 if let Some(path) = gallery.selected_image().cloned() {
-                    // Navigate to the image in normal mode
-                    if let Some(parent) = path.parent() {
-                        self.load_directory(&parent.to_path_buf())?;
-                        // Find and select the image
-                        if let Some(idx) = self.entries.iter().position(|e| e.path == path) {
-                            self.selected_index = idx;
-                        }
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = std::process::Command::new("open").arg(&path).spawn();
                     }
-                    self.gallery_view = None;
-                    self.mode = AppMode::Normal;
-                    // Force full screen clear to remove terminal graphics artifacts
-                    self.clear_on_next_render = true;
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/C", "start", "", &path.to_string_lossy()])
+                            .spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                    }
+                    self.status_message = Some(format!("Opened: {}", path.file_name().unwrap_or_default().to_string_lossy()));
                 }
             }
 

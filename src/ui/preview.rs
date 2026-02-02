@@ -188,32 +188,29 @@ impl ImagePreviewState {
             let cached_thumb = self.thumbnail_manager.get_cached_path(path, rotation);
 
             std::thread::spawn(move || {
-                // Try to load from thumbnail cache first (much faster - small JPEG)
-                // Thumbnails now have rotation pre-applied, so we can use cache for all rotations
-                let load_result = if let Some(ref thumb_path) = cached_thumb {
-                    image::ImageReader::open(thumb_path)
-                        .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                } else {
-                    // Fall back to loading original and resizing with rotation
-                    image::ImageReader::open(&path_clone)
-                        .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                        .map(|img| {
-                            let resized = img.resize(size, size, FilterType::Triangle);
-                            // Apply rotation since no cached thumbnail available
-                            match rotation {
-                                90 => resized.rotate90(),
-                                180 => resized.rotate180(),
-                                270 => resized.rotate270(),
-                                _ => resized,
-                            }
-                        })
-                };
+                // Always load from original for preview - we need higher resolution than cached thumbnails
+                // Cached thumbnails are 256px, but preview needs 1024px for quality
+                // Rotation is applied here since we're loading from original
+                let load_result = image::ImageReader::open(&path_clone)
+                    .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+                    .map(|img| {
+                        let resized = img.resize(size, size, FilterType::Triangle);
+                        // Apply rotation
+                        match rotation {
+                            90 => resized.rotate90(),
+                            180 => resized.rotate180(),
+                            270 => resized.rotate270(),
+                            _ => resized,
+                        }
+                    });
 
                 if let Ok(dyn_img) = load_result {
-                    // No need to apply rotation - either loaded from pre-rotated thumbnail
-                    // or rotation was applied during resize above
                     let _ = sender.send((path_clone, dyn_img));
                 }
+
+                // Note: cached_thumb is available but not used here since it's only 256px
+                // and preview needs higher resolution. Cache is still useful for gallery view.
+                let _ = cached_thumb; // Suppress unused warning
             });
         }
 

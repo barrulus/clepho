@@ -9,9 +9,46 @@ pub mod trash;
 
 use anyhow::Result;
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use schema::{SCHEMA, MIGRATIONS};
+
+/// Convert EXIF orientation value (1-8) to rotation degrees (0, 90, 180, 270)
+fn exif_orientation_to_degrees(orientation: i32) -> i32 {
+    match orientation {
+        6 => 90,   // Rotate 90 CW
+        3 => 180,  // Rotate 180
+        8 => 270,  // Rotate 90 CCW
+        _ => 0,    // Normal (1) or other values
+    }
+}
+
+/// Read EXIF orientation directly from an image file and return rotation degrees
+fn read_exif_rotation_from_file(path: &Path) -> i32 {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+
+    let mut reader = BufReader::new(file);
+    let exif = match exif::Reader::new().read_from_container(&mut reader) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+
+    if let Some(field) = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
+        if let exif::Value::Short(ref v) = field.value {
+            if let Some(&orientation) = v.first() {
+                return exif_orientation_to_degrees(orientation as i32);
+            }
+        }
+    }
+
+    0
+}
 pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
 pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, FaceWithPhoto, Person};
@@ -313,6 +350,7 @@ impl Database {
 
     /// Get the effective rotation for a photo (combines EXIF orientation and user rotation).
     /// Returns rotation in degrees (0, 90, 180, 270).
+    /// If the photo is not in the database, reads EXIF orientation directly from file.
     pub fn get_photo_rotation(&self, path: &std::path::Path) -> Result<i32> {
         let path_str = path.to_string_lossy();
         let result = self.conn.query_row(
@@ -328,16 +366,14 @@ impl Database {
         match result {
             Ok((exif_orientation, user_rotation)) => {
                 // Convert EXIF orientation to degrees
-                let exif_degrees = match exif_orientation {
-                    6 => 90,   // Rotate 90 CW
-                    3 => 180,  // Rotate 180
-                    8 => 270,  // Rotate 90 CCW
-                    _ => 0,    // Normal or other values
-                };
+                let exif_degrees = exif_orientation_to_degrees(exif_orientation);
                 // Combine with user rotation
                 Ok((exif_degrees + user_rotation) % 360)
             }
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // Photo not in database - read EXIF directly from file
+                Ok(read_exif_rotation_from_file(path))
+            }
             Err(e) => Err(e.into()),
         }
     }
