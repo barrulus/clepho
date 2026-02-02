@@ -156,6 +156,50 @@ translucent wings are in sharp focus against a soft, blurred
 green background."
 ```
 
+## Customizing the Prompt
+
+You can customize the LLM prompt to get shorter or more focused descriptions.
+
+### Configuration
+
+Add `custom_prompt` to your `[llm]` section in `config.toml`:
+
+```toml
+[llm]
+provider = "lmstudio"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "llava-1.5-7b"
+
+# Custom context prepended to the default prompt
+custom_prompt = "Keep responses brief, under 50 words. Focus only on the main subject."
+```
+
+### How It Works
+
+Your custom prompt is prepended as context to the default prompt:
+
+```
+Context: [your custom_prompt here]
+
+Describe this image in detail. Include information about:
+1) The main subject or scene
+2) Notable objects, people, or elements
+3) Colors, lighting, and mood
+4) Any text visible in the image
+5) Suggested tags for organizing this photo.
+Keep the description concise but informative.
+```
+
+### Example Custom Prompts
+
+| Goal | Custom Prompt |
+|------|---------------|
+| Shorter descriptions | `"Keep responses under 50 words."` |
+| Tags only | `"Only provide comma-separated tags, no prose."` |
+| People focus | `"Focus on describing people: their appearance, expressions, and actions."` |
+| Technical details | `"Focus on camera settings, composition, and photographic technique."` |
+| Specific context | `"These are photos from a wedding in June 2024."` |
+
 ## Semantic Search
 
 Search your photo collection using natural language.

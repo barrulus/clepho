@@ -15,6 +15,24 @@ A terminal-based photo manager with AI-powered features. Browse, organize, and c
 - **File Operations** - Move, rename, rotate, and trash with undo
 - **Gallery & Slideshow** - Visual browsing modes
 
+## Screenshots
+
+### Gallery View
+![Gallery View](docs/images/gallery_view.png)
+*Browse photos in a grid layout with keyboard navigation and batch selection.*
+
+### AI-Powered Descriptions
+![LLM Description](docs/images/llm_description.png)
+*Generate detailed image descriptions using local or cloud LLMs.*
+
+### Photo Scanning
+![Scan Modal](docs/images/scan_modal.png)
+*Index photos to extract EXIF metadata, generate thumbnails, and enable search.*
+
+### Help & Keybindings
+![Help Modal](docs/images/help_modal.png)
+*Quick reference for all keyboard shortcuts, organized by category.*
+
 ## Quick Start
 
 ```bash

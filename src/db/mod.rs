@@ -135,8 +135,12 @@ impl Database {
         &self.conn
     }
 
-    /// Save LLM description for a photo by path
+    /// Save LLM description for a photo by path.
+    /// Creates a minimal photo record if one doesn't exist yet.
     pub fn save_description(&self, path: &std::path::Path, description: &str) -> Result<()> {
+        // Ensure photo record exists before updating
+        self.ensure_photo_exists(path)?;
+
         let path_str = path.to_string_lossy();
         self.conn.execute(
             r#"

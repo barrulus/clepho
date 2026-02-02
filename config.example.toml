@@ -12,6 +12,10 @@ endpoint = "http://127.0.0.1:1234/v1"
 model = "gemma-3-4b"
 # api_key = "sk-..."  # Required for openai/anthropic
 
+# Custom prompt context prepended to image descriptions
+# Use this to fine-tune responses (e.g., shorter output, specific focus)
+# custom_prompt = "Keep responses brief, under 50 words. Focus only on the main subject."
+
 [scanner]
 # Supported image extensions
 image_extensions = [
