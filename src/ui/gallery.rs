@@ -739,9 +739,9 @@ fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
     };
 
     let help = if gallery.selection_mode == SelectionMode::Visual {
-        "Arrows:select range | Esc:exit visual | Space:toggle | d:delete | ]:rotate"
+        "Arrows:select range | Esc:exit visual | Space:toggle | d:trash | y:cut | ]:rotate"
     } else {
-        "Space:select | V:visual | v:view | +/-:size | s:sort | ]:rotate | Esc:exit | ?:help"
+        "Space:select | v:visual | S:view | +/-:size | s:sort | d:trash | y:cut | p:paste | ?:help"
     };
 
     let footer_chunks = Layout::default()
@@ -801,15 +801,17 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled("Selection", Style::default().add_modifier(Modifier::BOLD))),
         Line::from("  Space            Toggle select"),
-        Line::from("  V                Visual select mode"),
+        Line::from("  v / V            Visual select mode"),
         Line::from("  Ctrl+A           Select all"),
         Line::from("  Esc              Clear selection / Exit visual"),
         Line::from(""),
         Line::from(Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD))),
         Line::from("  ] / [            Rotate CW / CCW"),
         Line::from("  d / Delete       Move to trash"),
-        Line::from("  v / S            View image (slideshow)"),
-        Line::from("  Enter            Open in browser"),
+        Line::from("  y / x            Cut to clipboard"),
+        Line::from("  p                Paste from clipboard"),
+        Line::from("  S                View image (slideshow)"),
+        Line::from("  Enter            Open in external viewer"),
         Line::from("  +/-              Thumbnail size"),
         Line::from("  s                Cycle sort"),
         Line::from("  q                Exit gallery"),

@@ -551,9 +551,9 @@ fn render_image_metadata(
     // Hint for actions
     info_lines.push(Line::from(""));
     let hint = if metadata.as_ref().map(|m| m.description.is_some()).unwrap_or(false) {
-        "[D] regenerate | [{ }] scroll"
+        "[i] regenerate | [{ }] scroll"
     } else {
-        "[D] describe with AI | [s] scan"
+        "[i] describe with AI | [s] scan"
     };
     info_lines.push(Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))));
 
