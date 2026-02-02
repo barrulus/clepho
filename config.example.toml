@@ -1,0 +1,64 @@
+# Clepho Configuration
+# Copy to ~/.config/clepho/config.toml
+# See docs/configuration.md for full documentation
+
+# Database location
+db_path = "~/.local/share/clepho/clepho.db"
+
+[llm]
+# Provider: lmstudio, ollama, openai, anthropic
+provider = "lmstudio"
+endpoint = "http://127.0.0.1:1234/v1"
+model = "gemma-3-4b"
+# api_key = "sk-..."  # Required for openai/anthropic
+
+[scanner]
+# Supported image extensions
+image_extensions = [
+    "jpg", "jpeg", "png", "gif", "webp",
+    "heic", "heif", "raw", "cr2", "nef", "arw", "dng"
+]
+# Perceptual hash similarity threshold (0-256, lower = stricter)
+similarity_threshold = 50
+
+[preview]
+# Graphics protocol: auto, sixel, kitty, iterm2, halfblocks, none
+protocol = "auto"
+# Preview image size (pixels)
+thumbnail_size = 1024
+# external_viewer = "feh"  # Override system default
+
+[thumbnails]
+path = "~/.cache/clepho/thumbnails"
+size = 256
+
+[trash]
+path = "~/.local/share/clepho/.trash"
+max_age_days = 30
+max_size_bytes = 1073741824  # 1GB
+
+[schedule]
+check_overdue_on_startup = true
+
+[keybindings]
+# Yazi-compatible defaults - uncomment to customize
+# move_down = ["j", "Down"]
+# move_up = ["k", "Up"]
+# go_parent = ["h", "Left", "Backspace"]
+# enter_selected = ["l", "Right", "Enter"]
+# yank_files = ["y", "x"]
+# paste_files = ["p"]
+# delete_files = ["d", "Delete"]
+# rename_files = ["r"]
+# toggle_hidden = ["."]
+# toggle_show_all_files = ["H"]
+# find_duplicates = ["u"]
+# describe_with_llm = ["i"]
+# scan = ["s"]
+# semantic_search = ["/"]
+# manage_people = ["P"]
+# view_trash = ["X"]
+# open_gallery = ["A"]
+# open_slideshow = ["S"]
+# quit = ["q"]
+# show_help = ["?"]

@@ -47,18 +47,11 @@ See [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) for complete refere
 
 ## Configuration
 
-Config: `~/.config/clepho/config.toml`
-
-```toml
-[llm]
-provider = "lmstudio"  # lmstudio, ollama, openai, anthropic
-endpoint = "http://127.0.0.1:1234/v1"
-
-[preview]
-protocol = "auto"  # auto, sixel, kitty, iterm2, halfblocks
+```bash
+cp config.example.toml ~/.config/clepho/config.toml
 ```
 
-See [docs/configuration.md](docs/configuration.md) for all options.
+See [config.example.toml](config.example.toml) for all options or [docs/configuration.md](docs/configuration.md) for detailed documentation.
 
 ## Documentation
 
