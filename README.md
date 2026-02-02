@@ -36,17 +36,20 @@ A terminal-based photo manager with AI-powered features. Browse, organize, and c
 ## Quick Start
 
 ```bash
-# Build
+# Build from source
 cargo build --release
-
-# Run
 ./target/release/clepho
 
-# Or with Nix
-nix develop && cargo build --release
+# Or run directly with Nix (no install)
+nix run github:barrulus/clepho
+
+# Or install with Nix
+nix profile install github:barrulus/clepho
 ```
 
 Navigate with `h/j/k/l`, press `s` to scan, `?` for help.
+
+See [docs/installation.md](docs/installation.md) for NixOS configuration and other install methods.
 
 ## Keybindings
 

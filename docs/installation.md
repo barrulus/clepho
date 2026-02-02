@@ -33,13 +33,67 @@ cargo build --release
 ./target/release/clepho
 ```
 
-### Using Nix
+## NixOS / Nix
+
+Clepho provides a Nix flake for easy installation on NixOS and systems with Nix.
+
+### Run directly (no install)
 
 ```bash
-# Enter development shell
-nix develop
+nix run github:barrulus/clepho
+```
 
-# Build
+### Install to user profile
+
+```bash
+nix profile install github:barrulus/clepho
+```
+
+### Add to NixOS configuration
+
+In your system `flake.nix`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    clepho.url = "github:barrulus/clepho";
+  };
+
+  outputs = { self, nixpkgs, clepho, ... }: {
+    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [
+            clepho.packages.${pkgs.system}.default
+          ];
+        })
+      ];
+    };
+  };
+}
+```
+
+### Home Manager
+
+```nix
+{ inputs, pkgs, ... }:
+{
+  home.packages = [
+    inputs.clepho.packages.${pkgs.system}.default
+  ];
+}
+```
+
+### Development shell
+
+For contributing or building from source:
+
+```bash
+git clone https://github.com/barrulus/clepho
+cd clepho
+nix develop
 cargo build --release
 ```
 
