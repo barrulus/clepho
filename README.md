@@ -1,75 +1,77 @@
 # Clepho
 
-A terminal user interface (TUI) for managing photo collections. Scan, catalog, deduplicate, and AI-describe your photos from the command line.
+A terminal-based photo manager with AI-powered features. Browse, organize, and catalog your photo collection from the command line.
+
+![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
 ## Features
 
-- **Three-column file browser** with vim-style navigation and mouse support
-- **Photo scanning** with parallel processing and EXIF metadata extraction
-- **Duplicate detection** via SHA256 and perceptual hashing
-- **AI descriptions** using local LLM (LM Studio, Ollama) or cloud (OpenAI, Anthropic)
-- **Face detection & clustering** with person naming
-- **CLIP embeddings** for semantic image search
-- **View filtering** - hide dotfiles and non-image files by default
-- **Gallery & slideshow** modes for browsing
-- **File operations** - move, rename, rotate, trash with restore
-- **Scheduled tasks** for batch processing
-- **Export** to CSV or JSON
+- **File Browser** - Three-pane vim-style navigation with image previews
+- **Photo Scanning** - EXIF extraction, thumbnails, and metadata indexing
+- **Duplicate Detection** - Find exact and visually similar duplicates
+- **AI Descriptions** - Generate descriptions via local or cloud LLMs
+- **Face Recognition** - Detect, cluster, and name people in photos
+- **Semantic Search** - Find photos by natural language descriptions
+- **File Operations** - Move, rename, rotate, and trash with undo
+- **Gallery & Slideshow** - Visual browsing modes
 
-## Installation
+## Quick Start
 
 ```bash
-# With Nix
-nix develop && cargo build --release
-
-# With Cargo
+# Build
 cargo build --release
+
+# Run
+./target/release/clepho
+
+# Or with Nix
+nix develop && cargo build --release
 ```
 
-Binary: `target/release/clepho`
+Navigate with `h/j/k/l`, press `s` to scan, `?` for help.
 
-## Usage
+## Keybindings
 
-```bash
-clepho
-```
+Clepho uses [Yazi](https://yazi-rs.github.io/)-compatible keybindings:
 
-Press `?` for help with all keyboard shortcuts.
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| `h/j/k/l` | Navigate | `y/x` | Cut |
+| `d` | Trash | `p` | Paste |
+| `r` | Rename | `.` | Toggle hidden |
+| `s` | Scan | `u` | Duplicates |
+| `i` | AI describe | `/` | Search |
+| `?` | Help | `q` | Quit |
 
-### Key Bindings (Yazi-compatible)
-
-| Key | Action |
-|-----|--------|
-| `h/j/k/l` | Navigate (vim-style) |
-| `y/x` | Cut files |
-| `p` | Paste files |
-| `d` | Move to trash |
-| `r` | Rename |
-| `.` | Toggle hidden files |
-| `s` | Scan directory |
-| `u` | Find duplicates |
-| `i` | AI describe photo |
-| `/` | Semantic search |
-| `o` | Open in system viewer |
-| `?` | Help |
-| `q` | Quit |
+See [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) for complete reference.
 
 ## Configuration
 
-Config file: `~/.config/clepho/config.toml`
+Config: `~/.config/clepho/config.toml`
 
 ```toml
 [llm]
 provider = "lmstudio"  # lmstudio, ollama, openai, anthropic
 endpoint = "http://127.0.0.1:1234/v1"
-model = "gemma-3-4b"
 
 [preview]
-protocol = "auto"  # auto, sixel, kitty, iterm2, halfblocks, none
-
-[trash]
-max_age_days = 30
+protocol = "auto"  # auto, sixel, kitty, iterm2, halfblocks
 ```
+
+See [docs/configuration.md](docs/configuration.md) for all options.
+
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [Installation](docs/installation.md) | Build requirements and setup |
+| [Navigation](docs/navigation.md) | File browser and preview pane |
+| [Scanning](docs/scanning.md) | Photo indexing and metadata |
+| [Duplicates](docs/duplicates.md) | Finding and managing duplicates |
+| [AI Features](docs/ai-features.md) | LLM descriptions and CLIP search |
+| [Faces](docs/faces.md) | Face detection and people |
+| [File Operations](docs/file-operations.md) | Move, rename, and organize |
+| [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Complete keybinding reference |
 
 ## License
 
