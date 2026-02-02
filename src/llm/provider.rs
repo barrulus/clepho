@@ -3,8 +3,9 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Detected face information from LLM
+/// Detected face information from LLM (reserved for LLM-based face detection)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct DetectedFace {
     /// Bounding box as percentage of image dimensions (0-100)
     pub x_percent: f32,
@@ -17,8 +18,9 @@ pub struct DetectedFace {
     pub confidence: f32,
 }
 
-/// Response from face detection
+/// Response from face detection (reserved for LLM-based face detection)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct FaceDetectionResponse {
     pub faces: Vec<DetectedFace>,
     pub image_width: Option<u32>,
@@ -43,7 +45,8 @@ pub trait LlmProvider: Send + Sync {
         false
     }
 
-    /// Detect faces in an image (optional)
+    /// Detect faces in an image (optional, reserved for future implementation)
+    #[allow(dead_code)]
     fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
         // Default implementation that extracts faces from image description
         let _ = image_path;
@@ -51,6 +54,7 @@ pub trait LlmProvider: Send + Sync {
     }
 
     /// Check if this provider supports face detection
+    #[allow(dead_code)]
     fn supports_face_detection(&self) -> bool {
         false
     }
@@ -139,6 +143,7 @@ impl OpenAICompatibleProvider {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_embedding_model(mut self, model: &str) -> Self {
         self.embedding_model = model.to_string();
         self
@@ -371,6 +376,7 @@ fn build_image_prompt(custom_prompt: Option<&str>) -> String {
 }
 
 /// Extract JSON from a string that might contain markdown code blocks
+#[allow(dead_code)]
 fn extract_json(content: &str) -> String {
     let trimmed = content.trim();
 
@@ -649,6 +655,7 @@ impl OllamaProvider {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_embedding_model(mut self, model: &str) -> Self {
         self.embedding_model = model.to_string();
         self

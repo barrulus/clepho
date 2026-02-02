@@ -50,8 +50,8 @@ pub struct SlideshowView {
     receiver: Option<mpsc::Receiver<(String, DynamicImage)>>,
     /// Sender for async image loading
     sender: mpsc::Sender<(String, DynamicImage)>,
-    /// Source directory
-    pub directory: PathBuf,
+    /// Source directory (stored for potential future use)
+    pub _directory: PathBuf,
 }
 
 impl SlideshowView {
@@ -70,7 +70,7 @@ impl SlideshowView {
             loading: std::collections::HashSet::new(),
             receiver: Some(rx),
             sender: tx,
-            directory,
+            _directory: directory,
         }
     }
 
@@ -95,6 +95,7 @@ impl SlideshowView {
     }
 
     /// Check if image preview is available
+    #[allow(dead_code)]
     pub fn is_available(&self) -> bool {
         self.picker.is_some()
     }

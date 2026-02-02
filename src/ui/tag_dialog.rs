@@ -120,6 +120,7 @@ impl TagDialog {
     }
 
     /// Clear input
+    #[allow(dead_code)]
     pub fn clear_input(&mut self) {
         self.input.clear();
         self.update_suggestions();
@@ -213,8 +214,8 @@ fn render_view_mode(frame: &mut Frame, dialog: &TagDialog, chunks: std::rc::Rc<[
 }
 
 fn render_add_mode(frame: &mut Frame, dialog: &TagDialog, chunks: std::rc::Rc<[Rect]>) {
-    // Input field
-    let input_text = if dialog.input.is_empty() {
+    // Input field (placeholder text computed but using dialog.input directly below)
+    let _input_text = if dialog.input.is_empty() {
         "Type tag name (Enter=select/create, Esc=cancel)"
     } else {
         &dialog.input

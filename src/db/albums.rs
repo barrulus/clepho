@@ -1,4 +1,7 @@
 //! Database functions for user tags and albums.
+//! Most album functionality is reserved for future implementation.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use rusqlite::params;
@@ -10,11 +13,13 @@ use super::Database;
 pub struct UserTag {
     pub id: i64,
     pub name: String,
+    #[allow(dead_code)]
     pub color: String,
 }
 
 /// An album (collection of photos)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Album {
     pub id: i64,
     pub name: String,
@@ -88,6 +93,7 @@ impl Database {
     }
 
     /// Delete a tag
+    #[allow(dead_code)]
     pub fn delete_tag(&self, tag_id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM user_tags WHERE id = ?", [tag_id])?;
         Ok(())

@@ -9,7 +9,9 @@ pub struct TrashManager {
     config: TrashConfig,
 }
 
+/// Entry for file-system based trash listing (alternative to database tracking)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TrashEntry {
     pub trash_path: PathBuf,
     pub original_path: PathBuf,
@@ -17,7 +19,9 @@ pub struct TrashEntry {
     pub size: u64,
 }
 
+/// Result of a cleanup operation
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct CleanupResult {
     pub files_deleted: usize,
     pub bytes_freed: u64,
@@ -108,6 +112,7 @@ impl TrashManager {
     }
 
     /// Get all files in trash directory (for simple listing without DB)
+    #[allow(dead_code)]
     pub fn list_trash_files(&self) -> Result<Vec<PathBuf>> {
         if !self.config.path.exists() {
             return Ok(Vec::new());
@@ -123,7 +128,8 @@ impl TrashManager {
         Ok(files)
     }
 
-    /// Get total trash size in bytes
+    /// Get total trash size in bytes (file-system based, alternative to DB query)
+    #[allow(dead_code)]
     pub fn total_size(&self) -> Result<u64> {
         if !self.config.path.exists() {
             return Ok(0);
@@ -140,6 +146,7 @@ impl TrashManager {
     }
 
     /// Get trash path
+    #[allow(dead_code)]
     pub fn trash_path(&self) -> &Path {
         &self.config.path
     }

@@ -1,3 +1,8 @@
+//! Database functions for face detection and people management.
+//! Face detection feature is in development; many items are reserved for future use.
+
+#![allow(dead_code)]
+
 use anyhow::Result;
 use rusqlite::params;
 

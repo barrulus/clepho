@@ -1,7 +1,7 @@
 //! Database operations for scheduled tasks.
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use super::Database;
@@ -76,6 +76,7 @@ impl ScheduleStatus {
 
 /// A scheduled task record.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ScheduledTask {
     pub id: i64,
     pub task_type: ScheduledTaskType,
@@ -168,6 +169,7 @@ impl Database {
     }
 
     /// Get all scheduled tasks (for display).
+    #[allow(dead_code)]
     pub fn get_all_schedules(&self) -> Result<Vec<ScheduledTask>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -227,6 +229,7 @@ impl Database {
     }
 
     /// Delete a scheduled task.
+    #[allow(dead_code)]
     pub fn delete_schedule(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM scheduled_tasks WHERE id = ?", [id])?;
         Ok(())

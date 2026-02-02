@@ -594,10 +594,6 @@ impl App {
             Action::MoveUp => self.move_up(),
             Action::GoParent => self.go_parent()?,
             Action::EnterSelected => self.enter_selected()?,
-            Action::GoToTop => {
-                self.selected_index = 0;
-                self.scroll_offset = 0;
-            }
             Action::GoToBottom => self.go_to_bottom(),
             Action::PageDown => self.page_down(),
             Action::PageUp => self.page_up(),
@@ -612,16 +608,6 @@ impl App {
             // Selection
             Action::ToggleSelection => self.toggle_selection(),
             Action::EnterVisualMode => self.enter_visual_mode(),
-            Action::CancelOrClear => {
-                if self.task_manager.has_running_tasks() {
-                    if self.task_manager.cancel_most_recent() {
-                        self.status_message = Some("Task cancelled".to_string());
-                    }
-                } else if !self.selected_files.is_empty() || self.mode == AppMode::Visual {
-                    self.exit_visual_mode();
-                    self.clear_selection();
-                }
-            }
 
             // Actions requiring confirmation
             Action::Scan | Action::DescribeWithLlm | Action::BatchLlm |
@@ -932,6 +918,7 @@ impl App {
         self.entries.get(self.selected_index)
     }
 
+    #[allow(dead_code)]
     pub fn get_llm_description(&mut self) -> Option<String> {
         let entry = self.selected_entry()?.clone();
 

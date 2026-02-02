@@ -4,7 +4,7 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use ratatui_image::{Resize, StatefulImage};
+use ratatui_image::StatefulImage;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -117,6 +117,8 @@ pub struct GalleryView {
     receiver: Option<mpsc::Receiver<(PathBuf, DynamicImage)>>,
     /// Sender for async thumbnail loading
     sender: mpsc::Sender<(PathBuf, DynamicImage)>,
+    /// Track last rendered areas to avoid unnecessary re-encoding
+    last_render_areas: HashMap<PathBuf, Rect>,
     /// Directory being viewed
     pub directory: PathBuf,
 }
@@ -137,6 +139,7 @@ impl GalleryView {
             receiver: Some(rx),
             sender: tx,
             directory,
+            last_render_areas: HashMap::new(),
         }
     }
 
@@ -161,6 +164,7 @@ impl GalleryView {
     }
 
     /// Check if image preview is available
+    #[allow(dead_code)]
     pub fn is_available(&self) -> bool {
         self.picker.is_some()
     }
@@ -178,6 +182,7 @@ impl GalleryView {
     }
 
     /// Get total number of rows
+    #[allow(dead_code)]
     pub fn total_rows(&self, columns: usize) -> usize {
         (self.images.len() + columns - 1) / columns
     }
@@ -299,6 +304,7 @@ impl GalleryView {
     pub fn clear_cache(&mut self) {
         self.thumbnail_cache.clear();
         self.loading.clear();
+        self.last_render_areas.clear();
     }
 
     /// Change thumbnail size
@@ -479,7 +485,9 @@ fn render_thumbnail_cell(
 
     // Try to render the thumbnail
     if let Some(protocol) = gallery.load_thumbnail(path) {
-        let image = StatefulImage::new(None).resize(Resize::Fit(None));
+        // Use StatefulImage without explicit resize - protocol handles it
+        // This avoids potential re-encoding on every frame
+        let image = StatefulImage::new(None);
         frame.render_stateful_widget(image, inner, protocol);
     } else if gallery.is_loading(path) {
         // Show loading indicator

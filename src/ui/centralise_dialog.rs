@@ -21,8 +21,8 @@ pub struct CentraliseDialog {
     pub result: Option<CentraliseResult>,
     /// Currently selected item in preview list
     pub selected_index: usize,
-    /// Scroll offset for the list
-    pub scroll_offset: usize,
+    /// Scroll offset for the list (reserved for future scrolling implementation)
+    pub _scroll_offset: usize,
     /// Current mode
     pub mode: CentraliseDialogMode,
     /// Source files to centralise
@@ -51,7 +51,7 @@ impl CentraliseDialog {
             preview: None,
             result: None,
             selected_index: 0,
-            scroll_offset: 0,
+            _scroll_offset: 0,
             mode: CentraliseDialogMode::Configure,
             source_files,
             error: None,
@@ -97,6 +97,7 @@ impl CentraliseDialog {
     }
 
     /// Get the currently selected planned operation
+    #[allow(dead_code)]
     pub fn selected_operation(&self) -> Option<&PlannedOperation> {
         self.preview.as_ref()?.operations.get(self.selected_index)
     }

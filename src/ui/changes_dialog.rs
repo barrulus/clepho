@@ -109,6 +109,7 @@ impl ChangesDialog {
     }
 
     /// Check if a path is selected.
+    #[allow(dead_code)]
     pub fn is_selected(&self, path: &PathBuf) -> bool {
         self.selected_files.contains(path)
     }

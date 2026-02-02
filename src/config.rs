@@ -101,7 +101,6 @@ pub enum Action {
     MoveUp,
     GoParent,
     EnterSelected,
-    GoToTop,
     GoToBottom,
     PageDown,
     PageUp,
@@ -112,7 +111,6 @@ pub enum Action {
     // Selection
     ToggleSelection,
     EnterVisualMode,
-    CancelOrClear,
 
     // Actions
     Scan,

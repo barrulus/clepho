@@ -7,4 +7,4 @@
 
 mod model;
 
-pub use model::{ClipModel, ClipEmbedding};
+pub use model::ClipModel;

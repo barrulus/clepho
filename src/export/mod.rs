@@ -23,6 +23,7 @@ impl ExportFormat {
         }
     }
 
+    #[allow(dead_code)]
     pub fn name(&self) -> &'static str {
         match self {
             ExportFormat::Json => "JSON",

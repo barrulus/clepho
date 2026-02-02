@@ -1,3 +1,5 @@
+//! Embedding storage and similarity search functionality.
+
 use anyhow::Result;
 use rusqlite::params;
 
@@ -5,6 +7,7 @@ use super::Database;
 
 /// Embedding record from the database
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct EmbeddingRecord {
     pub photo_id: i64,
     pub embedding: Vec<f32>,
@@ -14,6 +17,7 @@ pub struct EmbeddingRecord {
 /// Search result with similarity score
 #[derive(Debug, Clone)]
 pub struct SearchResult {
+    #[allow(dead_code)]
     pub photo_id: i64,
     pub path: String,
     pub filename: String,
@@ -44,6 +48,7 @@ impl Database {
     }
 
     /// Get embedding for a photo
+    #[allow(dead_code)]
     pub fn get_embedding(&self, photo_id: i64) -> Result<Option<EmbeddingRecord>> {
         let result = self.conn.query_row(
             "SELECT photo_id, embedding, model_name FROM embeddings WHERE photo_id = ?",
@@ -147,6 +152,7 @@ impl Database {
     }
 
     /// Get photos without embeddings for batch processing
+    #[allow(dead_code)]
     pub fn get_photos_without_embeddings(&self, limit: usize) -> Result<Vec<(i64, String)>> {
         let mut stmt = self.conn.prepare(
             r#"

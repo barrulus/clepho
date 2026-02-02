@@ -2,6 +2,10 @@
 //!
 //! This module provides a trait-based abstraction layer that allows
 //! the application to work with different database backends (SQLite, PostgreSQL).
+//!
+//! Currently reserved for future multi-database support.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use std::path::Path;

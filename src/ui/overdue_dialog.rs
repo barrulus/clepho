@@ -60,6 +60,7 @@ impl OverdueDialog {
     }
 
     /// Get currently selected task.
+    #[allow(dead_code)]
     pub fn selected_task(&self) -> Option<&ScheduledTask> {
         self.tasks.get(self.selected_index)
     }

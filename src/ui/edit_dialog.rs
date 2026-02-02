@@ -16,8 +16,8 @@ pub struct EditDescriptionDialog {
     pub text: String,
     /// Cursor position in text
     pub cursor: usize,
-    /// Scroll offset for long text
-    pub scroll: u16,
+    /// Scroll offset for long text (reserved for future scrolling)
+    pub _scroll: u16,
 }
 
 impl EditDescriptionDialog {
@@ -29,7 +29,7 @@ impl EditDescriptionDialog {
             original: description,
             text,
             cursor,
-            scroll: 0,
+            _scroll: 0,
         }
     }
 
@@ -152,8 +152,8 @@ pub fn render(frame: &mut Frame, dialog: &EditDescriptionDialog, area: Rect) {
         .block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(filename_widget, chunks[0]);
 
-    // Text area with cursor
-    let text_with_cursor = if dialog.cursor < dialog.text.len() {
+    // Text area with cursor (computed for potential future use)
+    let _text_with_cursor = if dialog.cursor < dialog.text.len() {
         let (before, after) = dialog.text.split_at(dialog.cursor);
         let cursor_char = after.chars().next().unwrap_or(' ');
         let rest = &after[cursor_char.len_utf8()..];

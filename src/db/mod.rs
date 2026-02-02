@@ -16,10 +16,11 @@ pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
 pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, FaceWithPhoto, Person};
 pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
-pub use albums::{Album, UserTag};
+pub use albums::UserTag;
 
 /// Full metadata for a photo from the database
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct PhotoMetadata {
     pub id: i64,
     pub path: String,
@@ -343,6 +344,7 @@ impl Database {
 
     /// Set user rotation for a photo.
     /// rotation should be 0, 90, 180, or 270 degrees.
+    #[allow(dead_code)]
     pub fn set_user_rotation(&self, path: &std::path::Path, rotation: i32) -> Result<()> {
         let path_str = path.to_string_lossy();
         // Normalize rotation to 0, 90, 180, 270
@@ -428,6 +430,7 @@ impl Database {
     }
 
     /// Reset user rotation to 0 (rely on EXIF only).
+    #[allow(dead_code)]
     pub fn reset_photo_rotation(&self, path: &std::path::Path) -> Result<()> {
         let path_str = path.to_string_lossy();
         self.conn.execute(

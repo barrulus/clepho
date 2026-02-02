@@ -123,11 +123,13 @@ impl ImagePreviewState {
     }
 
     /// Check if metadata is cached for a path
+    #[allow(dead_code)]
     pub fn has_cached_metadata(&self, path: &PathBuf) -> bool {
         self.metadata_cache.contains_key(path)
     }
 
     /// Clear metadata cache for a specific path (e.g., after rescan)
+    #[allow(dead_code)]
     pub fn invalidate_metadata(&mut self, path: &PathBuf) {
         self.metadata_cache.remove(path);
     }

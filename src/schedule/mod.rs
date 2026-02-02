@@ -3,7 +3,7 @@
 use chrono::{Local, Timelike, Utc};
 use std::time::Instant;
 
-use crate::db::{Database, ScheduleStatus, ScheduledTask, ScheduledTaskType};
+use crate::db::{Database, ScheduleStatus, ScheduledTask};
 
 /// Manages the polling and execution of scheduled tasks.
 pub struct ScheduleManager {
@@ -112,6 +112,7 @@ pub fn mark_task_completed(
 }
 
 /// Mark a scheduled task as failed.
+#[allow(dead_code)]
 pub fn mark_task_failed(
     task_id: i64,
     db: &Database,

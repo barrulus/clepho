@@ -34,6 +34,7 @@ pub struct CentraliseResult {
 
 /// A single file operation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FileOperation {
     /// Original file path
     pub source: PathBuf,
@@ -61,9 +62,11 @@ pub struct PlannedOperation {
     pub source: PathBuf,
     /// Proposed destination path
     pub destination: PathBuf,
-    /// File size in bytes
+    /// File size in bytes (reserved for UI display)
+    #[allow(dead_code)]
     pub size_bytes: u64,
-    /// Generated filename components for display
+    /// Generated filename components for display (reserved for UI display)
+    #[allow(dead_code)]
     pub filename_parts: FilenameParts,
 }
 
@@ -137,6 +140,7 @@ impl FilenameParts {
     }
 
     /// Check if this file has the NO_CAT marker
+    #[allow(dead_code)]
     pub fn is_uncategorized(&self) -> bool {
         self.date.is_none() && self.event.is_none() && self.description.is_none()
     }
