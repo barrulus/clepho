@@ -19,6 +19,8 @@ pub use change_detection::{detect_changes, ChangeDetectionResult};
 pub use discovery::discover_images;
 pub use hashing::HashResult;
 pub use metadata::ImageMetadata;
+#[allow(unused_imports)]
+pub use metadata::ImageOrientation;
 pub use thumbnails::ThumbnailManager;
 
 #[derive(Debug, Clone)]
@@ -179,8 +181,19 @@ impl Scanner {
         // Calculate hashes
         let hashes = hashing::calculate_hashes(path).ok();
 
-        // Generate thumbnail (cached)
-        let _ = self.thumbnail_manager.generate(path);
+        // Generate thumbnail with EXIF rotation applied
+        // Convert EXIF orientation (1-8) to rotation degrees
+        let rotation_degrees = metadata
+            .as_ref()
+            .and_then(|m| m.orientation)
+            .map(|o| match o {
+                3 => 180,  // Rotate 180
+                6 => 90,   // Rotate 90 CW
+                8 => 270,  // Rotate 90 CCW (270 CW)
+                _ => 0,    // Normal or flipped (we ignore flips for now)
+            })
+            .unwrap_or(0);
+        let _ = self.thumbnail_manager.generate(path, rotation_degrees);
 
         Ok(ScannedPhoto {
             path: path.clone(),

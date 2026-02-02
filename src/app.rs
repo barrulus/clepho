@@ -2891,6 +2891,8 @@ impl App {
 
     /// Handle key events in gallery mode
     fn handle_gallery_key(&mut self, key: KeyEvent) -> Result<()> {
+        use crate::ui::gallery::SelectionMode;
+
         let gallery = match self.gallery_view.as_mut() {
             Some(g) => g,
             None => {
@@ -2902,13 +2904,25 @@ impl App {
         // Store dimensions for navigation - use reasonable defaults
         let columns = gallery.columns(120); // Approximate terminal width
         let visible_rows = gallery.visible_rows(30); // Approximate terminal height
+        let in_visual_mode = gallery.selection_mode == SelectionMode::Visual;
 
         match key.code {
-            // Exit gallery
-            KeyCode::Esc | KeyCode::Char('q') => {
+            // Exit gallery or visual mode
+            KeyCode::Esc => {
+                if in_visual_mode {
+                    gallery.exit_visual_mode();
+                } else if gallery.selection_count() > 0 {
+                    gallery.clear_selection();
+                } else {
+                    self.gallery_view = None;
+                    self.mode = AppMode::Normal;
+                    self.clear_on_next_render = true;
+                }
+            }
+
+            KeyCode::Char('q') => {
                 self.gallery_view = None;
                 self.mode = AppMode::Normal;
-                // Force full screen clear to remove terminal graphics artifacts
                 self.clear_on_next_render = true;
             }
 
@@ -2917,11 +2931,54 @@ impl App {
                 self.mode = AppMode::GalleryHelp;
             }
 
-            // Navigation
-            KeyCode::Char('h') | KeyCode::Left => gallery.move_left(),
-            KeyCode::Char('l') | KeyCode::Right => gallery.move_right(),
-            KeyCode::Char('k') | KeyCode::Up => gallery.move_up(columns),
-            KeyCode::Char('j') | KeyCode::Down => gallery.move_down(columns),
+            // Toggle select
+            KeyCode::Char(' ') => {
+                gallery.toggle_select();
+            }
+
+            // Visual mode
+            KeyCode::Char('V') => {
+                if in_visual_mode {
+                    gallery.exit_visual_mode();
+                } else {
+                    gallery.enter_visual_mode();
+                }
+            }
+
+            // Select all
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                gallery.select_all();
+            }
+
+            // Navigation (with visual selection update)
+            KeyCode::Char('h') | KeyCode::Left => {
+                if in_visual_mode {
+                    gallery.move_left_with_selection();
+                } else {
+                    gallery.move_left();
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if in_visual_mode {
+                    gallery.move_right_with_selection();
+                } else {
+                    gallery.move_right();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if in_visual_mode {
+                    gallery.move_up_with_selection(columns);
+                } else {
+                    gallery.move_up(columns);
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if in_visual_mode {
+                    gallery.move_down_with_selection(columns);
+                } else {
+                    gallery.move_down(columns);
+                }
+            }
 
             // Jump to start/end
             KeyCode::Char('g') => gallery.move_to_start(),
@@ -2943,6 +3000,90 @@ impl App {
 
             // Sort options
             KeyCode::Char('s') => gallery.cycle_sort(),
+
+            // Rotate selected images
+            KeyCode::Char(']') => {
+                let paths = if gallery.selection_count() > 0 {
+                    gallery.get_selected_paths()
+                } else if let Some(path) = gallery.selected_image().cloned() {
+                    vec![path]
+                } else {
+                    vec![]
+                };
+
+                let mut rotated = 0;
+                for path in &paths {
+                    if let Ok(new_rotation) = self.db.rotate_photo_cw(path) {
+                        self.image_preview.invalidate_thumbnail(path);
+                        rotated += 1;
+                        tracing::debug!(path = %path.display(), rotation = new_rotation, "Rotated CW");
+                    }
+                }
+                if rotated > 0 {
+                    self.status_message = Some(format!("Rotated {} image(s) clockwise", rotated));
+                    // Clear thumbnail cache to force reload with new rotation
+                    gallery.clear_cache();
+                }
+            }
+            KeyCode::Char('[') => {
+                let paths = if gallery.selection_count() > 0 {
+                    gallery.get_selected_paths()
+                } else if let Some(path) = gallery.selected_image().cloned() {
+                    vec![path]
+                } else {
+                    vec![]
+                };
+
+                let mut rotated = 0;
+                for path in &paths {
+                    if let Ok(new_rotation) = self.db.rotate_photo_ccw(path) {
+                        self.image_preview.invalidate_thumbnail(path);
+                        rotated += 1;
+                        tracing::debug!(path = %path.display(), rotation = new_rotation, "Rotated CCW");
+                    }
+                }
+                if rotated > 0 {
+                    self.status_message = Some(format!("Rotated {} image(s) counter-clockwise", rotated));
+                    gallery.clear_cache();
+                }
+            }
+
+            // Delete selected images (move to trash)
+            KeyCode::Char('d') | KeyCode::Delete => {
+                let paths = if gallery.selection_count() > 0 {
+                    gallery.get_selected_paths()
+                } else if let Some(path) = gallery.selected_image().cloned() {
+                    vec![path]
+                } else {
+                    vec![]
+                };
+
+                if !paths.is_empty() {
+                    let mut trashed = 0;
+                    for path in &paths {
+                        if self.trash_manager.move_to_trash(path).is_ok() {
+                            trashed += 1;
+                        }
+                    }
+                    if trashed > 0 {
+                        self.status_message = Some(format!("Moved {} image(s) to trash", trashed));
+                        // Remove trashed images from gallery
+                        gallery.images.retain(|p| !paths.contains(p));
+                        gallery.selected_indices.clear();
+                        // Adjust selected index if needed
+                        if gallery.selected >= gallery.images.len() && !gallery.images.is_empty() {
+                            gallery.selected = gallery.images.len() - 1;
+                        }
+                        // Exit gallery if no images left
+                        if gallery.images.is_empty() {
+                            self.gallery_view = None;
+                            self.mode = AppMode::Normal;
+                            self.clear_on_next_render = true;
+                            self.status_message = Some("Gallery empty - returning to browser".to_string());
+                        }
+                    }
+                }
+            }
 
             // View selected image in slideshow
             KeyCode::Char('v') | KeyCode::Char('S') => {

@@ -95,11 +95,21 @@ impl SortOption {
     }
 }
 
+/// Selection mode for gallery
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelectionMode {
+    /// Normal mode - single cursor selection
+    #[default]
+    Normal,
+    /// Visual mode - range selection from anchor to cursor
+    Visual,
+}
+
 /// Gallery view state
 pub struct GalleryView {
     /// All image paths in the current directory
     pub images: Vec<PathBuf>,
-    /// Currently selected index
+    /// Currently selected index (cursor position)
     pub selected: usize,
     /// First visible row (for scrolling)
     pub scroll_offset: usize,
@@ -121,6 +131,12 @@ pub struct GalleryView {
     last_render_areas: HashMap<PathBuf, Rect>,
     /// Directory being viewed
     pub directory: PathBuf,
+    /// Set of selected indices (for multi-select)
+    pub selected_indices: HashSet<usize>,
+    /// Selection mode (normal or visual)
+    pub selection_mode: SelectionMode,
+    /// Visual mode anchor point (start of range selection)
+    pub visual_anchor: Option<usize>,
 }
 
 impl GalleryView {
@@ -140,6 +156,9 @@ impl GalleryView {
             sender: tx,
             directory,
             last_render_areas: HashMap::new(),
+            selected_indices: HashSet::new(),
+            selection_mode: SelectionMode::Normal,
+            visual_anchor: None,
         }
     }
 
@@ -268,26 +287,40 @@ impl GalleryView {
         }
     }
 
-    /// Load a thumbnail for the given path (does NOT poll - call poll_async_loads first)
-    pub fn load_thumbnail(&mut self, path: &PathBuf) -> Option<&mut StatefulProtocol> {
-        // Check cache first
-        if self.thumbnail_cache.contains_key(path) {
-            return self.thumbnail_cache.get_mut(path);
+    /// Load a thumbnail for the given path with rotation applied
+    /// rotation_degrees: 0, 90, 180, or 270 degrees clockwise
+    pub fn load_thumbnail(&mut self, path: &PathBuf, rotation_degrees: i32) -> Option<&mut StatefulProtocol> {
+        // Create cache key that includes rotation
+        let cache_key = PathBuf::from(format!("{}#{}", path.display(), rotation_degrees));
+
+        // Check cache first (using rotation-aware key)
+        if self.thumbnail_cache.contains_key(&cache_key) {
+            return self.thumbnail_cache.get_mut(&cache_key);
         }
 
         // Start async load if not already loading
-        if !self.loading.contains(path) && self.picker.is_some() {
-            self.loading.insert(path.clone());
+        if !self.loading.contains(&cache_key) && self.picker.is_some() {
+            self.loading.insert(cache_key.clone());
             let path_clone = path.clone();
             let sender = self.sender.clone();
             let size = self.thumbnail_size.pixel_size();
+            let rotation = rotation_degrees;
 
             std::thread::spawn(move || {
                 if let Ok(img) = image::ImageReader::open(&path_clone)
                     .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
                 {
                     let resized = img.resize(size, size, FilterType::Triangle);
-                    let _ = sender.send((path_clone, resized));
+                    // Apply rotation
+                    let rotated = match rotation {
+                        90 => resized.rotate90(),
+                        180 => resized.rotate180(),
+                        270 => resized.rotate270(),
+                        _ => resized,
+                    };
+                    // Send with rotation-aware cache key
+                    let cache_key = PathBuf::from(format!("{}#{}", path_clone.display(), rotation));
+                    let _ = sender.send((cache_key, rotated));
                 }
             });
         }
@@ -295,9 +328,10 @@ impl GalleryView {
         None
     }
 
-    /// Check if a thumbnail is currently loading
-    pub fn is_loading(&self, path: &PathBuf) -> bool {
-        self.loading.contains(path)
+    /// Check if a thumbnail is currently loading (rotation-aware)
+    pub fn is_loading(&self, path: &PathBuf, rotation_degrees: i32) -> bool {
+        let cache_key = PathBuf::from(format!("{}#{}", path.display(), rotation_degrees));
+        self.loading.contains(&cache_key)
     }
 
     /// Clear thumbnail cache (e.g., when changing thumbnail size)
@@ -349,10 +383,106 @@ impl GalleryView {
             }
         }
     }
+
+    // === Selection Methods ===
+
+    /// Toggle selection of current item (Space key)
+    pub fn toggle_select(&mut self) {
+        if self.selected_indices.contains(&self.selected) {
+            self.selected_indices.remove(&self.selected);
+        } else {
+            self.selected_indices.insert(self.selected);
+        }
+    }
+
+    /// Enter visual selection mode (V key)
+    pub fn enter_visual_mode(&mut self) {
+        self.selection_mode = SelectionMode::Visual;
+        self.visual_anchor = Some(self.selected);
+        // Clear existing selection and select the anchor
+        self.selected_indices.clear();
+        self.selected_indices.insert(self.selected);
+    }
+
+    /// Exit visual mode (Escape)
+    pub fn exit_visual_mode(&mut self) {
+        self.selection_mode = SelectionMode::Normal;
+        self.visual_anchor = None;
+    }
+
+    /// Update visual selection when cursor moves
+    fn update_visual_selection(&mut self) {
+        if self.selection_mode == SelectionMode::Visual {
+            if let Some(anchor) = self.visual_anchor {
+                self.selected_indices.clear();
+                let start = anchor.min(self.selected);
+                let end = anchor.max(self.selected);
+                for i in start..=end {
+                    self.selected_indices.insert(i);
+                }
+            }
+        }
+    }
+
+    /// Clear all selections
+    pub fn clear_selection(&mut self) {
+        self.selected_indices.clear();
+        self.selection_mode = SelectionMode::Normal;
+        self.visual_anchor = None;
+    }
+
+    /// Select all images
+    pub fn select_all(&mut self) {
+        for i in 0..self.images.len() {
+            self.selected_indices.insert(i);
+        }
+    }
+
+    /// Get count of selected items
+    pub fn selection_count(&self) -> usize {
+        self.selected_indices.len()
+    }
+
+    /// Check if an index is selected
+    pub fn is_selected(&self, idx: usize) -> bool {
+        self.selected_indices.contains(&idx)
+    }
+
+    /// Get selected image paths
+    pub fn get_selected_paths(&self) -> Vec<PathBuf> {
+        self.selected_indices
+            .iter()
+            .filter_map(|&idx| self.images.get(idx).cloned())
+            .collect()
+    }
+
+    /// Move with visual selection update
+    pub fn move_left_with_selection(&mut self) {
+        self.move_left();
+        self.update_visual_selection();
+    }
+
+    pub fn move_right_with_selection(&mut self) {
+        self.move_right();
+        self.update_visual_selection();
+    }
+
+    pub fn move_up_with_selection(&mut self, columns: usize) {
+        self.move_up(columns);
+        self.update_visual_selection();
+    }
+
+    pub fn move_down_with_selection(&mut self, columns: usize) {
+        self.move_down(columns);
+        self.update_visual_selection();
+    }
 }
 
 /// Render the gallery view
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Borrow db separately to get rotation info
+    let db = &app.db;
+
     let gallery = match app.gallery_view.as_mut() {
         Some(g) => g,
         None => return,
@@ -379,8 +509,8 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Render header
     render_header(frame, gallery, chunks[0]);
 
-    // Render thumbnail grid
-    render_grid(frame, gallery, chunks[1], columns, visible_rows);
+    // Render thumbnail grid with database access for rotation
+    render_grid(frame, gallery, db, chunks[1], columns, visible_rows);
 
     // Render footer with controls
     render_footer(frame, gallery, chunks[2]);
@@ -404,7 +534,7 @@ fn render_header(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, area: Rect, columns: usize, visible_rows: usize) {
+fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, db: &crate::db::Database, area: Rect, columns: usize, visible_rows: usize) {
     let cell_width = gallery.thumbnail_size.cell_width();
     let cell_height = gallery.thumbnail_size.cell_height();
 
@@ -436,9 +566,12 @@ fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, area: Rect, columns
             let image_idx = actual_row * columns + col_idx;
 
             if image_idx < gallery.images.len() {
-                let is_selected = image_idx == gallery.selected;
+                let is_cursor = image_idx == gallery.selected;
+                let is_selected = gallery.is_selected(image_idx);
                 let path = gallery.images[image_idx].clone();
-                render_thumbnail_cell(frame, gallery, &path, *cell_area, is_selected);
+                // Get rotation from database (combines EXIF + user rotation)
+                let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+                render_thumbnail_cell(frame, gallery, &path, *cell_area, is_cursor, is_selected, rotation);
             }
         }
     }
@@ -449,13 +582,17 @@ fn render_thumbnail_cell(
     gallery: &mut GalleryView,
     path: &PathBuf,
     area: Rect,
+    is_cursor: bool,
     is_selected: bool,
+    rotation_degrees: i32,
 ) {
     // Create block with selection highlighting
-    let border_color = if is_selected {
-        Color::Cyan
-    } else {
-        Color::DarkGray
+    // Cursor = current position (cyan), Selected = in selection set (green)
+    let (border_color, border_type) = match (is_cursor, is_selected) {
+        (true, true) => (Color::Yellow, Borders::ALL),    // Cursor + Selected
+        (true, false) => (Color::Cyan, Borders::ALL),     // Cursor only
+        (false, true) => (Color::Green, Borders::ALL),    // Selected only
+        (false, false) => (Color::DarkGray, Borders::ALL), // Neither
     };
 
     let filename = path.file_name()
@@ -471,7 +608,7 @@ fn render_thumbnail_cell(
     };
 
     let block = Block::default()
-        .borders(Borders::ALL)
+        .borders(border_type)
         .border_style(Style::default().fg(border_color))
         .title(display_name);
 
@@ -483,13 +620,13 @@ fn render_thumbnail_cell(
         return;
     }
 
-    // Try to render the thumbnail
-    if let Some(protocol) = gallery.load_thumbnail(path) {
+    // Try to render the thumbnail with rotation
+    if let Some(protocol) = gallery.load_thumbnail(path, rotation_degrees) {
         // Use StatefulImage without explicit resize - protocol handles it
         // This avoids potential re-encoding on every frame
         let image = StatefulImage::new(None);
         frame.render_stateful_widget(image, inner, protocol);
-    } else if gallery.is_loading(path) {
+    } else if gallery.is_loading(path, rotation_degrees) {
         // Show loading indicator
         let loading = Paragraph::new("Loading...")
             .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
@@ -516,6 +653,12 @@ fn render_thumbnail_cell(
 }
 
 fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
+    let selection_count = gallery.selection_count();
+    let mode_indicator = match gallery.selection_mode {
+        SelectionMode::Normal => "",
+        SelectionMode::Visual => " [VISUAL]",
+    };
+
     let selected_info = if let Some(path) = gallery.selected_image() {
         let filename = path.file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -523,12 +666,21 @@ fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
         let size = std::fs::metadata(path)
             .map(|m| format_size(m.len()))
             .unwrap_or_default();
-        format!("{} ({}) | {}/{}", filename, size, gallery.selected + 1, gallery.images.len())
+        let selection_str = if selection_count > 0 {
+            format!(" | {} selected", selection_count)
+        } else {
+            String::new()
+        };
+        format!("{} ({}) | {}/{}{}{}", filename, size, gallery.selected + 1, gallery.images.len(), selection_str, mode_indicator)
     } else {
         "No selection".to_string()
     };
 
-    let help = "Arrows:move | v:view | Enter:open | +/-:size | s:sort | Esc:exit | ?:help";
+    let help = if gallery.selection_mode == SelectionMode::Visual {
+        "Arrows:select range | Esc:exit visual | Space:toggle | d:delete | ]:rotate"
+    } else {
+        "Space:select | V:visual | v:view | +/-:size | s:sort | ]:rotate | Esc:exit | ?:help"
+    };
 
     let footer_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -562,8 +714,8 @@ fn format_size(size: u64) -> String {
 
 /// Render gallery help dialog
 pub fn render_help(frame: &mut Frame, area: Rect) {
-    let dialog_width = 55.min(area.width.saturating_sub(4));
-    let dialog_height = 18.min(area.height.saturating_sub(4));
+    let dialog_width = 60.min(area.width.saturating_sub(4));
+    let dialog_height = 28.min(area.height.saturating_sub(4));
 
     let x = (area.width - dialog_width) / 2;
     let y = (area.height - dialog_height) / 2;
@@ -575,6 +727,7 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
     let help_text = vec![
         Line::from(Span::styled("Gallery View", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
         Line::from(""),
+        Line::from(Span::styled("Navigation", Style::default().add_modifier(Modifier::BOLD))),
         Line::from("  h/Left           Move left"),
         Line::from("  l/Right          Move right"),
         Line::from("  k/Up             Move up"),
@@ -583,12 +736,21 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  G                Go to last"),
         Line::from("  PgUp/Ctrl+B      Page up"),
         Line::from("  PgDn/Ctrl+F      Page down"),
-        Line::from("  v/S              View image (slideshow)"),
+        Line::from(""),
+        Line::from(Span::styled("Selection", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from("  Space            Toggle select"),
+        Line::from("  V                Visual select mode"),
+        Line::from("  Ctrl+A           Select all"),
+        Line::from("  Esc              Clear selection / Exit visual"),
+        Line::from(""),
+        Line::from(Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from("  ] / [            Rotate CW / CCW"),
+        Line::from("  d / Delete       Move to trash"),
+        Line::from("  v / S            View image (slideshow)"),
         Line::from("  Enter            Open in browser"),
-        Line::from("  +/=              Larger thumbnails"),
-        Line::from("  -                Smaller thumbnails"),
-        Line::from("  s                Cycle sort (name/date/size)"),
-        Line::from("  Esc/q            Exit gallery view"),
+        Line::from("  +/-              Thumbnail size"),
+        Line::from("  s                Cycle sort"),
+        Line::from("  q                Exit gallery"),
         Line::from("  ?                Toggle this help"),
     ];
 

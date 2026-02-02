@@ -91,6 +91,7 @@ fn init_embedding_model() -> Result<()> {
 }
 
 /// Initialize both face detection models (for backwards compatibility)
+#[allow(dead_code)]
 pub fn init_models() -> Result<()> {
     init_detection_model()?;
     init_embedding_model()?;
@@ -98,16 +99,19 @@ pub fn init_models() -> Result<()> {
 }
 
 /// Check if models are initialized
+#[allow(dead_code)]
 pub fn models_initialized() -> bool {
     DETECTION_MODEL.get().is_some() && EMBEDDING_MODEL.get().is_some()
 }
 
 /// Check if detection model is initialized
+#[allow(dead_code)]
 pub fn detection_model_initialized() -> bool {
     DETECTION_MODEL.get().is_some()
 }
 
 /// Detect faces in an image file (with embeddings - slower)
+#[allow(dead_code)]
 pub fn detect_faces(image_path: &Path) -> Result<Vec<DetectedFace>> {
     if !models_initialized() {
         init_models()?;
@@ -134,6 +138,7 @@ fn load_image_for_detection(path: &Path) -> Result<DynamicImage> {
 }
 
 /// Detect faces in a DynamicImage (with embeddings - slower)
+#[allow(dead_code)]
 pub fn detect_faces_in_image(img: &DynamicImage) -> Result<Vec<DetectedFace>> {
     detect_faces_in_image_impl(img, true)
 }
@@ -403,6 +408,7 @@ fn run_arcface_embedding(session: &mut Session, face_img: &DynamicImage) -> Resu
 
 /// Calculate cosine similarity between two face embeddings
 /// Returns value between -1 and 1 (higher = more similar)
+#[allow(dead_code)]
 pub fn embedding_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
@@ -420,6 +426,7 @@ pub fn embedding_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Calculate euclidean distance between two face embeddings
+#[allow(dead_code)]
 pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() {
         return f32::MAX;
@@ -433,11 +440,13 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Check if two faces are likely the same person
+#[allow(dead_code)]
 pub fn faces_match(embedding_a: &[f32], embedding_b: &[f32], threshold: f32) -> bool {
     embedding_similarity(embedding_a, embedding_b) > threshold
 }
 
 /// Default matching threshold for normalized embeddings (cosine similarity)
+#[allow(dead_code)]
 pub const DEFAULT_MATCH_THRESHOLD: f32 = 0.5;
 
 /// Generate embedding for an existing face (given image path and bounding box)

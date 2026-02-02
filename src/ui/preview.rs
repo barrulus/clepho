@@ -135,11 +135,21 @@ impl ImagePreviewState {
     }
 
     /// Clear image cache for the current path (e.g., after rotation change)
+    /// Also invalidates the on-disk thumbnail cache so it will be regenerated
     pub fn invalidate_cache(&mut self) {
         if let Some(ref path) = self.current_path.clone() {
             self.image_cache.remove(path);
             self.metadata_cache.remove(path);
+            // Also invalidate on-disk thumbnail cache for all rotations
+            self.thumbnail_manager.invalidate(path);
         }
+    }
+
+    /// Invalidate thumbnail for a specific path (used by gallery rotation)
+    pub fn invalidate_thumbnail(&mut self, path: &PathBuf) {
+        self.image_cache.remove(path);
+        self.metadata_cache.remove(path);
+        self.thumbnail_manager.invalidate(path);
     }
 
     fn create_picker(protocol: ImageProtocol) -> Option<Picker> {
@@ -174,30 +184,34 @@ impl ImagePreviewState {
             let size = thumbnail_size;
             let rotation = rotation_degrees;
 
-            // Check for pre-generated thumbnail from scan
-            let cached_thumb = self.thumbnail_manager.get_cached_path(path);
+            // Check for pre-generated thumbnail from scan (now rotation-aware)
+            let cached_thumb = self.thumbnail_manager.get_cached_path(path, rotation);
 
             std::thread::spawn(move || {
                 // Try to load from thumbnail cache first (much faster - small JPEG)
-                // Note: thumbnails don't have rotation applied, so we skip cache if rotated
-                let load_result = if cached_thumb.is_some() && rotation == 0 {
-                    image::ImageReader::open(cached_thumb.as_ref().unwrap())
+                // Thumbnails now have rotation pre-applied, so we can use cache for all rotations
+                let load_result = if let Some(ref thumb_path) = cached_thumb {
+                    image::ImageReader::open(thumb_path)
                         .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
                 } else {
-                    // Fall back to loading original and resizing
+                    // Fall back to loading original and resizing with rotation
                     image::ImageReader::open(&path_clone)
                         .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                        .map(|img| img.resize(size, size, FilterType::Triangle))
+                        .map(|img| {
+                            let resized = img.resize(size, size, FilterType::Triangle);
+                            // Apply rotation since no cached thumbnail available
+                            match rotation {
+                                90 => resized.rotate90(),
+                                180 => resized.rotate180(),
+                                270 => resized.rotate270(),
+                                _ => resized,
+                            }
+                        })
                 };
 
-                if let Ok(mut dyn_img) = load_result {
-                    // Apply rotation
-                    dyn_img = match rotation {
-                        90 => dyn_img.rotate90(),
-                        180 => dyn_img.rotate180(),
-                        270 => dyn_img.rotate270(),
-                        _ => dyn_img,
-                    };
+                if let Ok(dyn_img) = load_result {
+                    // No need to apply rotation - either loaded from pre-rotated thumbnail
+                    // or rotation was applied during resize above
                     let _ = sender.send((path_clone, dyn_img));
                 }
             });

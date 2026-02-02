@@ -46,6 +46,7 @@ pub struct ImageMetadata {
 /// 7 = Transverse (flip + rotate 90 CW)
 /// 8 = Rotate 90 CCW
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(dead_code)]
 pub enum ImageOrientation {
     #[default]
     Normal = 1,
@@ -58,6 +59,7 @@ pub enum ImageOrientation {
     Rotate90CCW = 8,
 }
 
+#[allow(dead_code)]
 impl ImageOrientation {
     pub fn from_exif(value: u16) -> Self {
         match value {
