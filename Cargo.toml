@@ -30,7 +30,8 @@ kamadak-exif = "0.5"
 img_hash = "3.2"
 
 # Face detection and recognition (ONNX Runtime)
-ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
+# Use load-dynamic for Nix builds, download-binaries for regular builds
+ort = { version = "2.0.0-rc.11", default-features = false, features = ["load-dynamic"] }
 ndarray = "0.16"
 
 # Hashing

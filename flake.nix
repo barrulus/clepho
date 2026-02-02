@@ -29,6 +29,7 @@
             # Native dependencies
             pkg-config
             openssl
+            onnxruntime
           ];
 
           shellHook = ''
@@ -40,6 +41,7 @@
           OPENSSL_DIR = "${pkgs.openssl.dev}";
           OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
           OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+          ORT_DYLIB_PATH = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
         };
 
         packages.default = pkgs.rustPlatform.buildRustPackage {
@@ -50,11 +52,24 @@
 
           nativeBuildInputs = with pkgs; [
             pkg-config
+            makeWrapper
           ];
 
           buildInputs = with pkgs; [
             openssl
+            onnxruntime
           ];
+
+          # Point ort to the onnxruntime library at build time
+          ORT_DYLIB_PATH = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
+
+          # Wrap the binary to include onnxruntime path at runtime
+          postInstall = ''
+            wrapProgram $out/bin/clepho \
+              --set ORT_DYLIB_PATH "${pkgs.onnxruntime}/lib/libonnxruntime.so"
+            wrapProgram $out/bin/clepho-daemon \
+              --set ORT_DYLIB_PATH "${pkgs.onnxruntime}/lib/libonnxruntime.so"
+          '';
         };
       }
     );
