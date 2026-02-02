@@ -36,17 +36,20 @@ clepho
 
 Press `?` for help with all keyboard shortcuts.
 
-### Key Bindings (highlights)
+### Key Bindings (Yazi-compatible)
 
 | Key | Action |
 |-----|--------|
 | `h/j/k/l` | Navigate (vim-style) |
+| `y/x` | Cut files |
+| `p` | Paste files |
+| `d` | Move to trash |
+| `r` | Rename |
+| `.` | Toggle hidden files |
 | `s` | Scan directory |
-| `d` | Find duplicates |
-| `D` | AI describe photo |
+| `u` | Find duplicates |
+| `i` | AI describe photo |
 | `/` | Semantic search |
-| `H` | Toggle hidden files |
-| `.` | Toggle show all files |
 | `o` | Open in system viewer |
 | `?` | Help |
 | `q` | Quit |
@@ -67,12 +70,6 @@ protocol = "auto"  # auto, sixel, kitty, iterm2, halfblocks, none
 [trash]
 max_age_days = 30
 ```
-
-### LLM Setup
-
-**LM Studio**: Install, download a vision model, start server on port 1234.
-
-**Ollama**: `ollama pull llava`, set `provider = "ollama"` and `endpoint = "http://127.0.0.1:11434"`.
 
 ## License
 

@@ -2904,9 +2904,9 @@ impl App {
             }
         };
 
-        // Store dimensions for navigation - use reasonable defaults
-        let columns = gallery.columns(120); // Approximate terminal width
-        let visible_rows = gallery.visible_rows(30); // Approximate terminal height
+        // Use cached dimensions from last render for navigation
+        let columns = gallery.cached_columns();
+        let visible_rows = gallery.cached_visible_rows();
         let in_visual_mode = gallery.selection_mode == SelectionMode::Visual;
 
         match key.code {
@@ -2939,8 +2939,8 @@ impl App {
                 gallery.toggle_select();
             }
 
-            // Visual mode
-            KeyCode::Char('V') => {
+            // Visual mode (v/V - yazi-aligned)
+            KeyCode::Char('v') | KeyCode::Char('V') => {
                 if in_visual_mode {
                     gallery.exit_visual_mode();
                 } else {
@@ -3051,7 +3051,7 @@ impl App {
                 }
             }
 
-            // Delete selected images (move to trash)
+            // Delete selected images (move to trash) - yazi-aligned: d or Delete
             KeyCode::Char('d') | KeyCode::Delete => {
                 let paths = if gallery.selection_count() > 0 {
                     gallery.get_selected_paths()
@@ -3088,8 +3088,69 @@ impl App {
                 }
             }
 
-            // View selected image in slideshow
-            KeyCode::Char('v') | KeyCode::Char('S') => {
+            // Cut selected images to clipboard - yazi-aligned: y or x
+            KeyCode::Char('y') | KeyCode::Char('x') => {
+                let paths = if gallery.selection_count() > 0 {
+                    gallery.get_selected_paths()
+                } else if let Some(path) = gallery.selected_image().cloned() {
+                    vec![path]
+                } else {
+                    vec![]
+                };
+
+                if !paths.is_empty() {
+                    let count = paths.len();
+                    self.clipboard = paths;
+                    gallery.clear_selection();
+                    self.status_message = Some(format!("{} image(s) cut to clipboard", count));
+                }
+            }
+
+            // Paste images from clipboard - yazi-aligned: p
+            KeyCode::Char('p') => {
+                if self.clipboard.is_empty() {
+                    self.status_message = Some("Clipboard is empty".to_string());
+                } else {
+                    let target_dir = gallery.directory.clone();
+                    let mut moved = 0;
+                    let mut failed = 0;
+
+                    for source_path in self.clipboard.drain(..).collect::<Vec<_>>() {
+                        let filename = source_path.file_name().unwrap_or_default();
+                        let target_path = target_dir.join(filename);
+
+                        if target_path.exists() {
+                            self.status_message = Some(format!("File already exists: {}", target_path.display()));
+                            failed += 1;
+                            continue;
+                        }
+
+                        match std::fs::rename(&source_path, &target_path) {
+                            Ok(_) => {
+                                // Update database path
+                                let _ = self.db.update_photo_path(&source_path, &target_path);
+                                // Add to gallery
+                                gallery.images.push(target_path);
+                                moved += 1;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Move failed: {}", e));
+                                failed += 1;
+                            }
+                        }
+                    }
+
+                    if moved > 0 {
+                        self.status_message = Some(format!("Moved {} file(s){}", moved,
+                            if failed > 0 { format!(", {} failed", failed) } else { String::new() }));
+                        // Resort gallery to include new files
+                        gallery.images.sort();
+                    }
+                }
+            }
+
+            // View selected image in slideshow - S only (v is now visual mode)
+            KeyCode::Char('S') => {
                 use crate::ui::slideshow::SlideshowView;
                 let images = gallery.images.clone();
                 let selected = gallery.selected;

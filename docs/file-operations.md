@@ -16,7 +16,7 @@ Before performing operations, select files:
 
 | Key | Action |
 |-----|--------|
-| `v` | Enter visual mode |
+| `v` / `V` | Enter visual mode |
 | `j` / `k` | Extend selection |
 | `Esc` | Confirm selection |
 
@@ -24,7 +24,7 @@ Before performing operations, select files:
 
 | Key | Action |
 |-----|--------|
-| `V` | Select all files in directory |
+| `Ctrl+a` | Select all files (in gallery) |
 
 ### Selection Indicator
 
@@ -217,8 +217,8 @@ If operation fails mid-way:
 
 ### Reorganizing Collection
 
-1. Find duplicates (`d`)
-2. Move duplicates to trash (`x`)
+1. Find duplicates (`u`)
+2. Move duplicates to trash (`x` in duplicates view)
 3. Select remaining files
 4. Move to organized folders
 5. Rename with consistent pattern

@@ -11,7 +11,7 @@ Duplicate detection works by comparing:
 
 ## Starting Duplicate Detection
 
-Press `d` in normal mode to find duplicates in scanned photos.
+Press `u` in normal mode to find duplicates in scanned photos.
 
 ```
 Finding duplicates...
@@ -173,7 +173,7 @@ similarity_threshold = 50
    ```
 
 7. **Verify and permanently delete**
-   - Press `t` to view trash
+   - Press `X` to view trash
    - Review trashed files
    - Press `c` to cleanup or wait for auto-cleanup
 

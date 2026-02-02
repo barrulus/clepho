@@ -332,37 +332,49 @@ fn default_scroll_preview_down() -> Vec<KeySpec> { vec![KeySpec::Simple("}".into
 fn default_scroll_preview_up() -> Vec<KeySpec> { vec![KeySpec::Simple("{".into())] }
 fn default_go_home() -> Vec<KeySpec> { vec![KeySpec::Simple("~".into())] }
 fn default_toggle_selection() -> Vec<KeySpec> { vec![KeySpec::Simple("Space".into())] }
-fn default_enter_visual_mode() -> Vec<KeySpec> { vec![KeySpec::Simple("V".into())] }
+// Yazi-aligned: v = visual mode (V also works)
+fn default_enter_visual_mode() -> Vec<KeySpec> { vec![KeySpec::Simple("v".into()), KeySpec::Simple("V".into())] }
 fn default_scan() -> Vec<KeySpec> { vec![KeySpec::Simple("s".into())] }
-fn default_find_duplicates() -> Vec<KeySpec> { vec![KeySpec::Simple("d".into())] }
-fn default_describe_with_llm() -> Vec<KeySpec> { vec![KeySpec::Simple("D".into())] }
-fn default_batch_llm() -> Vec<KeySpec> { vec![KeySpec::Simple("P".into())] }
+// Clepho-specific: u = duplicates (d is trash in yazi)
+fn default_find_duplicates() -> Vec<KeySpec> { vec![KeySpec::Simple("u".into())] }
+// Clepho-specific: i = describe with LLM (info)
+fn default_describe_with_llm() -> Vec<KeySpec> { vec![KeySpec::Simple("i".into())] }
+fn default_batch_llm() -> Vec<KeySpec> { vec![KeySpec::Simple("I".into())] }
 fn default_detect_faces() -> Vec<KeySpec> { vec![KeySpec::Simple("F".into())] }
 fn default_cluster_faces() -> Vec<KeySpec> { vec![KeySpec::Simple("C".into())] }
-fn default_clip_embedding() -> Vec<KeySpec> { vec![KeySpec::Simple("I".into())] }
+fn default_clip_embedding() -> Vec<KeySpec> { vec![KeySpec::Simple("E".into())] }
 fn default_view_tasks() -> Vec<KeySpec> { vec![KeySpec::Simple("T".into())] }
-fn default_view_trash() -> Vec<KeySpec> { vec![KeySpec::Simple("t".into())] }
+// Clepho-specific: X = view trash (t is tabs in yazi, we don't have tabs)
+fn default_view_trash() -> Vec<KeySpec> { vec![KeySpec::Simple("X".into())] }
 fn default_move_files() -> Vec<KeySpec> { vec![KeySpec::Simple("m".into())] }
-fn default_rename_files() -> Vec<KeySpec> { vec![KeySpec::Simple("R".into())] }
-fn default_export_database() -> Vec<KeySpec> { vec![KeySpec::Simple("E".into())] }
+// Yazi-aligned: r = rename (lowercase)
+fn default_rename_files() -> Vec<KeySpec> { vec![KeySpec::Simple("r".into())] }
+fn default_export_database() -> Vec<KeySpec> { vec![KeySpec::Simple("O".into())] }
 fn default_semantic_search() -> Vec<KeySpec> { vec![KeySpec::Simple("/".into())] }
-fn default_manage_people() -> Vec<KeySpec> { vec![KeySpec::Simple("p".into())] }
+// Clepho-specific: P = manage people (p is paste in yazi)
+fn default_manage_people() -> Vec<KeySpec> { vec![KeySpec::Simple("P".into())] }
 fn default_edit_description() -> Vec<KeySpec> { vec![KeySpec::Simple("e".into())] }
 fn default_view_changes() -> Vec<KeySpec> { vec![KeySpec::Simple("c".into())] }
 fn default_open_schedule() -> Vec<KeySpec> { vec![KeySpec::Simple("@".into())] }
 fn default_open_gallery() -> Vec<KeySpec> { vec![KeySpec::Simple("A".into())] }
 fn default_open_tags() -> Vec<KeySpec> { vec![KeySpec::Simple("b".into())] }
-fn default_open_slideshow() -> Vec<KeySpec> { vec![KeySpec::Simple("S".into()), KeySpec::Simple("v".into())] }
+// Clepho-specific: S = slideshow (v is now visual mode)
+fn default_open_slideshow() -> Vec<KeySpec> { vec![KeySpec::Simple("S".into())] }
 fn default_centralise_files() -> Vec<KeySpec> { vec![KeySpec::Simple("L".into())] }
 fn default_rotate_cw() -> Vec<KeySpec> { vec![KeySpec::Simple("]".into())] }
 fn default_rotate_ccw() -> Vec<KeySpec> { vec![KeySpec::Simple("[".into())] }
-fn default_yank_files() -> Vec<KeySpec> { vec![KeySpec::Simple("y".into())] }
-fn default_paste_files() -> Vec<KeySpec> { vec![KeySpec::Simple("Y".into())] }
-fn default_delete_files() -> Vec<KeySpec> { vec![KeySpec::Simple("Delete".into())] }
+// Yazi-aligned: y = yank (copy), x = cut (we treat both as cut/move)
+fn default_yank_files() -> Vec<KeySpec> { vec![KeySpec::Simple("y".into()), KeySpec::Simple("x".into())] }
+// Yazi-aligned: p = paste
+fn default_paste_files() -> Vec<KeySpec> { vec![KeySpec::Simple("p".into())] }
+// Yazi-aligned: d = trash, D = permanent delete
+fn default_delete_files() -> Vec<KeySpec> { vec![KeySpec::Simple("d".into()), KeySpec::Simple("Delete".into())] }
 fn default_show_help() -> Vec<KeySpec> { vec![KeySpec::Simple("?".into())] }
 fn default_quit() -> Vec<KeySpec> { vec![KeySpec::Simple("q".into())] }
-fn default_toggle_hidden() -> Vec<KeySpec> { vec![KeySpec::Simple("H".into())] }
-fn default_toggle_show_all_files() -> Vec<KeySpec> { vec![KeySpec::Simple(".".into())] }
+// Yazi-aligned: . = toggle hidden files
+fn default_toggle_hidden() -> Vec<KeySpec> { vec![KeySpec::Simple(".".into())] }
+// Clepho-specific: H = show all files (not just images)
+fn default_toggle_show_all_files() -> Vec<KeySpec> { vec![KeySpec::Simple("H".into())] }
 fn default_open_external() -> Vec<KeySpec> { vec![KeySpec::Simple("o".into())] }
 
 impl Default for KeyBindings {

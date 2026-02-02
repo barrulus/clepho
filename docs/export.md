@@ -16,7 +16,7 @@ Export functionality allows you to:
 ### Opening Export Dialog
 
 1. Optionally select specific files (or select none for all)
-2. Press `e`
+2. Press `O`
 3. Choose export options
 4. Confirm export
 
@@ -148,22 +148,22 @@ Structured data format, ideal for:
 
 ### Export Selected Files
 
-1. Select files using `Space`, `v`, or `V`
-2. Press `e`
+1. Select files using `Space` or visual mode (`v`/`V`)
+2. Press `O`
 3. Dialog shows "N selected files"
 4. Export only those files
 
 ### Export All Files
 
 1. Ensure no files are selected
-2. Press `e`
+2. Press `O`
 3. Dialog shows "All N photos in database"
 4. Exports entire database
 
 ### Export Current Directory
 
-1. Select all in current directory (`V`)
-2. Press `e`
+1. Use visual mode (`v`) and select all files in directory
+2. Press `O`
 3. Exports only current directory photos
 
 ## Output Options

@@ -193,8 +193,8 @@ See [Scheduling](scheduling.md) for details.
 After scanning, you can:
 - View metadata in preview pane
 - Search by AI descriptions (`/`)
-- Find duplicates (`d`)
-- Export metadata (`e`)
+- Find duplicates (`u`)
+- Export metadata (`O`)
 
 ### Re-scanning
 

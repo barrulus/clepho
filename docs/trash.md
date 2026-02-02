@@ -51,7 +51,7 @@ max_size_bytes = 1073741824  # 1GB
 
 ### Opening Trash View
 
-Press `t` to open the trash dialog.
+Press `X` to open the trash dialog.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -99,14 +99,14 @@ Press `t` to open the trash dialog.
 ### From File Browser
 
 Currently, files are primarily trashed through:
-- Duplicate detection (`d` → mark → `x`)
+- Duplicate detection (`u` → mark → `x`)
 - Future: Direct delete command
 
 ## Restoring Files
 
 ### Single File Restore
 
-1. Open trash (`t`)
+1. Open trash (`X`)
 2. Navigate to file
 3. Press `Enter` or `r`
 
@@ -124,7 +124,7 @@ Restored: photo_001.jpg → /home/user/Photos/2024/photo_001.jpg
 
 ### Single File
 
-1. Open trash (`t`)
+1. Open trash (`X`)
 2. Navigate to file
 3. Press `d`
 4. File is permanently deleted
@@ -214,7 +214,7 @@ trashed_at = '2024-01-15T10:30:00'
 ### Recovering Mistake
 
 1. Realize file was needed
-2. Open trash (`t`)
+2. Open trash (`X`)
 3. Find the file
 4. Press `Enter` to restore
 5. File back in original location
@@ -250,7 +250,7 @@ Trash: 15 files | 234.5 MB / 1.0 GB (23%)
 
 ### Reclaiming Space
 
-1. Open trash (`t`)
+1. Open trash (`X`)
 2. Press `c` for cleanup
 3. Or manually delete large files with `d`
 

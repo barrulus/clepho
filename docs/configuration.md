@@ -195,28 +195,35 @@ default_hours_end = 17    # 5 PM
 
 ### Keybindings (`[keybindings]`)
 
-All keybindings are configurable. Keys can be simple characters or include modifiers:
+All keybindings are configurable. Defaults are aligned with [Yazi](https://yazi-rs.github.io/) file manager where possible.
 
 ```toml
 [keybindings]
-# Navigation
+# Navigation (vim-style)
 move_down = ["j", "Down"]
 move_up = ["k", "Up"]
 go_parent = ["h", "Left", "Backspace"]
 enter_selected = ["l", "Right", "Enter"]
-
-# Actions
-scan = ["s"]
-find_duplicates = ["d"]
-describe_with_llm = ["D"]
-open_slideshow = ["S"]
-toggle_hidden = ["H"]
-toggle_show_all_files = ["."]
-open_external = ["o"]
-
-# With modifiers
 page_down = ["Ctrl+f"]
 page_up = ["Ctrl+b"]
+
+# File operations (Yazi-compatible)
+yank_files = ["y", "x"]       # Cut
+paste_files = ["p"]           # Paste
+delete_files = ["d", "Delete"] # Trash
+rename_files = ["r"]          # Rename
+toggle_hidden = ["."]         # Toggle hidden files
+
+# Clepho-specific
+scan = ["s"]
+find_duplicates = ["u"]
+describe_with_llm = ["i"]
+batch_llm = ["I"]
+manage_people = ["P"]
+view_trash = ["X"]
+open_slideshow = ["S"]
+toggle_show_all_files = ["H"]
+open_external = ["o"]
 ```
 
 #### Key Format

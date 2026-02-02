@@ -137,6 +137,10 @@ pub struct GalleryView {
     pub selection_mode: SelectionMode,
     /// Visual mode anchor point (start of range selection)
     pub visual_anchor: Option<usize>,
+    /// Cached columns count from last render (for navigation)
+    cached_columns: usize,
+    /// Cached visible rows from last render (for navigation)
+    cached_visible_rows: usize,
 }
 
 impl GalleryView {
@@ -159,7 +163,25 @@ impl GalleryView {
             selected_indices: HashSet::new(),
             selection_mode: SelectionMode::Normal,
             visual_anchor: None,
+            cached_columns: 4,  // Default, updated on render
+            cached_visible_rows: 3,  // Default, updated on render
         }
+    }
+
+    /// Update cached layout values from render. Called during render to keep navigation in sync.
+    pub fn update_layout_cache(&mut self, columns: usize, visible_rows: usize) {
+        self.cached_columns = columns;
+        self.cached_visible_rows = visible_rows;
+    }
+
+    /// Get cached columns (used for navigation)
+    pub fn cached_columns(&self) -> usize {
+        self.cached_columns
+    }
+
+    /// Get cached visible rows (used for navigation)
+    pub fn cached_visible_rows(&self) -> usize {
+        self.cached_visible_rows
     }
 
     fn create_picker(protocol: ImageProtocol) -> Option<Picker> {
@@ -225,18 +247,57 @@ impl GalleryView {
         }
     }
 
-    /// Move selection up
+    /// Move selection up (same column, previous row)
+    /// If already on first row, stays in place
     pub fn move_up(&mut self, columns: usize) {
         if self.selected >= columns {
             self.selected -= columns;
         }
+        // If already on first row, stay in place (don't wrap or go to start)
     }
 
-    /// Move selection down
+    /// Get the row number for the current selection
+    #[allow(dead_code)]
+    pub fn current_row(&self, columns: usize) -> usize {
+        self.selected / columns
+    }
+
+    /// Check if selection is on the top visible row
+    #[allow(dead_code)]
+    pub fn is_on_top_visible_row(&self, columns: usize) -> bool {
+        self.current_row(columns) == self.scroll_offset
+    }
+
+    /// Check if selection is on the bottom visible row
+    #[allow(dead_code)]
+    pub fn is_on_bottom_visible_row(&self, columns: usize, visible_rows: usize) -> bool {
+        let current_row = self.current_row(columns);
+        current_row == self.scroll_offset + visible_rows - 1
+    }
+
+    /// Move selection down (same column, next row)
     pub fn move_down(&mut self, columns: usize) {
         let new_idx = self.selected + columns;
         if new_idx < self.images.len() {
             self.selected = new_idx;
+        } else if self.images.len() > 0 {
+            // If moving down would go past the end, go to the last item
+            // in the same column if it exists, otherwise stay in place
+            let current_col = self.selected % columns;
+            let last_row = (self.images.len() - 1) / columns;
+            let current_row = self.selected / columns;
+
+            // Only move if we're not already on the last row
+            if current_row < last_row {
+                // Try to go to same column in last row
+                let target = last_row * columns + current_col;
+                if target < self.images.len() {
+                    self.selected = target;
+                } else {
+                    // Column doesn't exist in last row, go to last item
+                    self.selected = self.images.len() - 1;
+                }
+            }
         }
     }
 
@@ -494,6 +555,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Calculate grid layout
     let columns = gallery.columns(area.width);
     let visible_rows = gallery.visible_rows(area.height.saturating_sub(3)); // -3 for header/footer
+    gallery.update_layout_cache(columns, visible_rows);
     gallery.ensure_visible(columns, visible_rows);
 
     // Main layout: header + grid + footer

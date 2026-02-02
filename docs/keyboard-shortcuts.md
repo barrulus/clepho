@@ -2,6 +2,8 @@
 
 Complete reference for all keyboard shortcuts in Clepho.
 
+Keybindings are designed to be compatible with [Yazi](https://yazi-rs.github.io/) file manager where possible.
+
 ## Global Keys
 
 These work in most modes:
@@ -38,49 +40,47 @@ These work in most modes:
 | Key | Action |
 |-----|--------|
 | `Space` | Toggle file selection |
-| `v` | Enter visual selection mode |
-| `V` | Select all files in directory |
+| `v` / `V` | Enter visual selection mode |
 
-### Scanning & Analysis
-
-| Key | Action |
-|-----|--------|
-| `s` | Scan current directory |
-| `d` | Find duplicate photos |
-| `D` | Describe selected image with AI |
-| `P` | Batch process all photos with AI |
-| `F` | Detect faces in scanned photos |
-| `C` | Cluster similar faces |
-| `I` | Generate CLIP embeddings |
-| `/` | Open semantic search |
-
-### File Operations
+### File Operations (Yazi-aligned)
 
 | Key | Action |
 |-----|--------|
-| `m` | Move selected files |
-| `R` | Rename selected files |
-| `E` | Export metadata |
-| `y` | Yank (copy) selected files |
-| `Y` | Paste yanked files |
+| `y` / `x` | Yank (cut) selected files |
+| `p` | Paste yanked files |
+| `d` / `Delete` | Move to trash |
+| `r` | Rename selected files |
+| `m` | Move selected files (with dialog) |
 | `]` | Rotate photo clockwise |
 | `[` | Rotate photo counter-clockwise |
-| `Delete` | Move to trash |
 | `L` | Centralise files to library |
 
 ### View Filters
 
 | Key | Action |
 |-----|--------|
-| `H` | Toggle hidden files/directories |
-| `.` | Toggle show all files (vs images only) |
+| `.` | Toggle hidden files/directories |
+| `H` | Toggle show all files (vs images only) |
+
+### Scanning & Analysis
+
+| Key | Action |
+|-----|--------|
+| `s` | Scan current directory |
+| `u` | Find duplicate photos |
+| `i` | Describe selected image with AI |
+| `I` | Batch process all photos with AI |
+| `F` | Detect faces in scanned photos |
+| `C` | Cluster similar faces |
+| `E` | Generate CLIP embeddings |
+| `/` | Open semantic search |
 
 ### Dialogs & Views
 
 | Key | Action |
 |-----|--------|
-| `p` | Open people (faces) dialog |
-| `t` | Open trash dialog |
+| `P` | Open people (faces) dialog |
+| `X` | Open trash dialog |
 | `c` | Check for file changes |
 | `@` | Open schedule dialog |
 | `T` | Open task list |
@@ -88,6 +88,7 @@ These work in most modes:
 | `S` | Open slideshow |
 | `b` | Open tags dialog |
 | `e` | Edit photo description |
+| `O` | Export metadata |
 | `?` | Show help overlay |
 
 ### External
@@ -99,18 +100,61 @@ These work in most modes:
 
 ## Visual Mode
 
-Entered with `v`:
+Entered with `v` or `V`:
 
 | Key | Action |
 |-----|--------|
 | `j` / `k` | Extend selection down/up |
 | `gg` | Extend to first |
 | `G` | Extend to last |
-| `Esc` | Confirm selection |
+| `d` / `x` / `Delete` | Trash selected |
+| `y` | Yank selected |
+| `Esc` | Exit visual mode |
+
+## Gallery View
+
+Entered with `A`:
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `h` / `j` / `k` / `l` | Navigate grid |
+| `Arrow keys` | Navigate grid |
+| `g` | Go to first image |
+| `G` | Go to last image |
+| `PageUp` / `Ctrl+b` | Page up |
+| `PageDown` / `Ctrl+f` | Page down |
+
+### Selection
+
+| Key | Action |
+|-----|--------|
+| `Space` | Toggle selection |
+| `v` / `V` | Enter visual mode |
+| `Ctrl+a` | Select all |
+| `Esc` | Clear selection / Exit gallery |
+
+### Operations
+
+| Key | Action |
+|-----|--------|
+| `y` / `x` | Cut selected to clipboard |
+| `p` | Paste from clipboard |
+| `d` / `Delete` | Move to trash |
+| `]` | Rotate clockwise |
+| `[` | Rotate counter-clockwise |
+| `s` | Cycle sort options |
+| `+` / `=` | Increase thumbnail size |
+| `-` | Decrease thumbnail size |
+| `S` | Open slideshow |
+| `Enter` | Open in external viewer |
+| `?` | Show help |
+| `q` | Exit gallery |
 
 ## Duplicates View
 
-Entered with `d`:
+Entered with `u`:
 
 | Key | Action |
 |-----|--------|
@@ -164,7 +208,7 @@ Entered with `/`:
 
 ## People Dialog
 
-Entered with `p`:
+Entered with `P`:
 
 | Key | Action |
 |-----|--------|
@@ -187,7 +231,7 @@ Entered with `p`:
 
 ## Trash Dialog
 
-Entered with `t`:
+Entered with `X`:
 
 | Key | Action |
 |-----|--------|
@@ -249,7 +293,7 @@ Entered with `T`:
 
 ## Export Dialog
 
-Entered with `e`:
+Entered with `O`:
 
 | Key | Action |
 |-----|--------|
@@ -283,25 +327,24 @@ Entered with `?`:
 
 | Modifier | Usage |
 |----------|-------|
-| `Shift` | Uppercase commands (`D`, `P`, `F`, `V`, `X`, `J`, `K`, `T`) |
+| `Shift` | Uppercase commands (`P`, `F`, `S`, `X`, `J`, `K`, `T`, `I`, `O`) |
 | `Ctrl` | Page navigation (`Ctrl+f`, `Ctrl+b`, `Ctrl+d`, `Ctrl+u`) |
 | None | Most commands |
 
-## Key Conventions
+## Yazi Compatibility
 
-### Vim-Style
+Clepho's keybindings are designed to match [Yazi](https://yazi-rs.github.io/) where possible:
 
-- `h/j/k/l` for navigation
-- `gg/G` for start/end
-- `Esc` to exit modes
-
-### Case Sensitivity
-
-- Lowercase: common operations
-- Uppercase: more significant/powerful operations
-  - `d` = find duplicates, `D` = describe with AI
-  - `x` = trash, `X` = permanent delete
-  - `j` = move in group, `J` = move between groups
+| Operation | Yazi | Clepho | Notes |
+|-----------|------|--------|-------|
+| Cut | `y` / `x` | `y` / `x` | Aligned |
+| Paste | `p` | `p` | Aligned |
+| Trash | `d` | `d` | Aligned |
+| Rename | `r` | `r` | Aligned |
+| Visual mode | `v` | `v` / `V` | Aligned |
+| Toggle hidden | `.` | `.` | Aligned |
+| Open external | `o` | `o` | Aligned |
+| Navigation | `h/j/k/l` | `h/j/k/l` | Aligned |
 
 ## Customization
 
@@ -310,18 +353,20 @@ Keybindings are configurable in `config.toml`. See [configuration.md](configurat
 ## Quick Reference Card
 
 ```
-NAVIGATION          OPERATIONS           VIEWS
-j/k     up/down     s   scan            d  duplicates
-h/l     left/right  D   AI describe     p  people
-gg/G    top/bottom  P   batch AI        t  trash
-~       home        F   face detect     T  tasks
-                    C   cluster faces   c  changes
-SELECTION           I   CLIP embed      @  schedule
-Space   toggle      /   search          A  gallery
-V       visual      m   move            S  slideshow
-                    R   rename          b  tags
-FILTERS             E   export          ?  help
-H       hidden      y   yank
-.       all files   Y   paste           EXTERNAL
-                    Del trash           o  open file
+NAVIGATION          FILE OPS (Yazi)      VIEWS
+j/k     up/down     y/x  cut             u  duplicates
+h/l     left/right  p    paste           P  people
+gg/G    top/bottom  d    trash           X  trash
+~       home        r    rename          T  tasks
+                    m    move dialog     c  changes
+SELECTION           ]/[  rotate          @  schedule
+Space   toggle                           A  gallery
+v/V     visual      SCANNING             S  slideshow
+                    s   scan             b  tags
+FILTERS             i   AI describe      ?  help
+.       hidden      I   batch AI
+H       all files   F   face detect      EXTERNAL
+                    C   cluster faces    o  open file
+                    E   CLIP embed
+                    /   search
 ```

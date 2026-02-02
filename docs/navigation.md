@@ -130,8 +130,8 @@ Select multiple files for batch operations:
 | Key | Action |
 |-----|--------|
 | `Space` | Toggle selection on current file |
-| `v` | Enter visual mode (select range) |
-| `V` | Select all files in directory |
+| `v` / `V` | Enter visual mode (select range) |
+| `Ctrl+a` | Select all (in gallery view) |
 | `Esc` | Clear selection / exit visual mode |
 
 ### Visual Mode
@@ -154,8 +154,8 @@ By default, Clepho hides dotfiles/directories and shows only supported image fil
 
 | Key | Action |
 |-----|--------|
-| `H` | Toggle hidden files (dotfiles) |
-| `.` | Toggle show all files vs images only |
+| `.` | Toggle hidden files (dotfiles) |
+| `H` | Toggle show all files vs images only |
 
 When filters are active, the status bar shows indicators like `[.*]` (hidden shown) or `[all]` (all files shown).
 
@@ -237,7 +237,7 @@ protocol = "auto"
 
 1. Scan the directory first (`s`) to enable metadata display
 2. Use semantic search (`/`) to find specific photos
-3. Use duplicate detection (`d`) to find similar photos
+3. Use duplicate detection (`u`) to find similar photos
 
 ### Multi-Monitor Workflow
 

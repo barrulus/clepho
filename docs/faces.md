@@ -53,7 +53,7 @@ For each face found:
 
 ### Opening People View
 
-Press `p` to open the people management dialog.
+Press `P` to open the people management dialog.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -88,7 +88,7 @@ Press `p` to open the people management dialog.
 
 ### Assigning Names
 
-1. Press `p` to open people view
+1. Press `P` to open people view
 2. Press `Tab` to switch to unassigned faces
 3. Navigate to a face cluster
 4. Press `n` to name
@@ -120,7 +120,7 @@ If the same person appears in multiple clusters:
 
 ## Viewing Person's Photos
 
-1. Open people view (`p`)
+1. Open people view (`P`)
 2. Select a person
 3. Press `Enter`
 4. Navigate to first photo of that person
@@ -217,7 +217,7 @@ updated_at  -- Last modified
    Found 2,341 faces in 1,876 photos
    ```
 
-3. **Open people view** (`p`)
+3. **Open people view** (`P`)
    - See automatically clustered faces
 
 4. **Name key people**

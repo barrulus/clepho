@@ -98,7 +98,7 @@ AI features in Clepho:
 ### Single Photo
 
 1. Navigate to a photo
-2. Press `D` (uppercase)
+2. Press `i` to describe with AI
 3. Wait for processing
 4. Description appears in preview pane
 
@@ -111,7 +111,7 @@ Done: "A golden retriever playing fetch on a sandy beach..."
 
 Process all photos in current directory:
 
-1. Press `P` (uppercase) for batch processing
+1. Press `I` (uppercase) for batch processing
 2. Progress shown in status bar: `[B:45%]`
 3. View task details with `T`
 
@@ -336,7 +336,7 @@ Error: Failed to connect to LLM endpoint
 
 ### Search Not Finding Photos
 
-- Ensure photos have descriptions (`D` first)
+- Ensure photos have descriptions (`i` first)
 - Check search terms match description style
 - Try broader search terms
 - Verify embeddings were generated
