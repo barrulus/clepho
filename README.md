@@ -64,6 +64,7 @@ See [config.example.toml](config.example.toml) for all options or [docs/configur
 | [AI Features](docs/ai-features.md) | LLM descriptions and CLIP search |
 | [Faces](docs/faces.md) | Face detection and people |
 | [File Operations](docs/file-operations.md) | Move, rename, and organize |
+| [Centralise](docs/centralise.md) | Organize photos into library |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Complete keybinding reference |
 
 ## License

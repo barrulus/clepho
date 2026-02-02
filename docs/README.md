@@ -24,6 +24,7 @@ Welcome to the Clepho documentation. Clepho is a terminal user interface (TUI) a
 
 ### File Management
 - [File Operations](file-operations.md) - Moving and renaming files
+- [Centralise](centralise.md) - Organizing photos into a library
 - [Export](export.md) - Exporting metadata to CSV/JSON
 
 ### Reference
