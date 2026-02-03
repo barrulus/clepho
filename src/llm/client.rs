@@ -101,7 +101,28 @@ impl LlmClient {
         self.provider.describe_image(image_path)
     }
 
+    /// Describe an image and generate tags in a single LLM call.
+    /// The LLM response is expected to contain a description followed by a `TAGS:` line.
+    /// Falls back to using the full response as description with empty tags if delimiter not found.
+    pub fn describe_and_tag_image(&self, image_path: &Path) -> Result<(String, Vec<String>)> {
+        let response = self.provider.describe_image(image_path)?;
+
+        if let Some(tags_idx) = response.find("TAGS:") {
+            let description = response[..tags_idx].trim().to_string();
+            let tags_str = response[tags_idx + 5..].trim();
+            let tags: Vec<String> = tags_str
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty())
+                .collect();
+            Ok((description, tags))
+        } else {
+            Ok((response, Vec::new()))
+        }
+    }
+
     /// Generate tags from a description (uses legacy OpenAI-compatible API)
+    #[allow(dead_code)]
     pub fn generate_tags(&self, description: &str) -> Result<Vec<String>> {
         let request = ChatRequest {
             model: self.model.clone(),

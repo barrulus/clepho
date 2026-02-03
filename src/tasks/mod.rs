@@ -39,6 +39,7 @@ pub enum TaskType {
     FaceDetection,
     FaceClustering,
     ClipEmbedding,
+    FindDuplicates,
 }
 
 impl TaskType {
@@ -51,6 +52,7 @@ impl TaskType {
             TaskType::FaceDetection => "F",
             TaskType::FaceClustering => "C",
             TaskType::ClipEmbedding => "E",
+            TaskType::FindDuplicates => "D",
         }
     }
 
@@ -63,6 +65,7 @@ impl TaskType {
             TaskType::FaceDetection => "Face Detection",
             TaskType::FaceClustering => "Face Clustering",
             TaskType::ClipEmbedding => "CLIP Embedding",
+            TaskType::FindDuplicates => "Find Duplicates",
         }
     }
 }

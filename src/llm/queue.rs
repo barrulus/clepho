@@ -240,9 +240,7 @@ impl LlmQueue {
 }
 
 fn process_task(client: &LlmClient, task: &LlmTask, db: &Database) -> Result<()> {
-    let description = client.describe_image(&task.photo_path)?;
-
-    let tags = client.generate_tags(&description)?;
+    let (description, tags) = client.describe_and_tag_image(&task.photo_path)?;
     let tags_json = serde_json::to_string(&tags)?;
 
     db.conn.execute(

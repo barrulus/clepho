@@ -71,6 +71,33 @@ impl DuplicatesView {
         }
     }
 
+    /// Remove photos by ID from all groups, then drop groups with fewer than 2 photos.
+    /// Adjusts cursor positions to remain valid.
+    pub fn remove_photos(&mut self, ids: &[i64]) {
+        let id_set: std::collections::HashSet<i64> = ids.iter().copied().collect();
+
+        for group in &mut self.groups {
+            group.photos.retain(|p| !id_set.contains(&p.id));
+        }
+
+        // Drop groups that no longer represent duplicates
+        self.groups.retain(|g| g.photos.len() > 1);
+
+        // Clamp cursors
+        if self.groups.is_empty() {
+            self.current_group = 0;
+            self.selected_photo = 0;
+        } else {
+            if self.current_group >= self.groups.len() {
+                self.current_group = self.groups.len() - 1;
+            }
+            let photo_count = self.groups[self.current_group].photos.len();
+            if self.selected_photo >= photo_count {
+                self.selected_photo = photo_count.saturating_sub(1);
+            }
+        }
+    }
+
     pub fn auto_select_for_deletion(&mut self) {
         for group in &mut self.groups {
             if group.photos.len() <= 1 {
@@ -360,7 +387,8 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  a                Auto-select (keep best)"),
         Line::from("  x                Move marked to trash"),
         Line::from("  X                Permanently delete"),
-        Line::from("  Esc              Exit duplicates view"),
+        Line::from("  R                Rescan duplicates"),
+        Line::from("  Esc              Exit (press u to return)"),
         Line::from("  ?                Toggle this help"),
         Line::from(""),
         Line::from(Span::styled("Legend", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),

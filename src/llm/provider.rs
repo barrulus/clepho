@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use image::GenericImageView;
+use image::codecs::jpeg::JpegEncoder;
 use serde::{Deserialize, Serialize};
+use std::io::Cursor;
 use std::path::Path;
 
 /// Detected face information from LLM (reserved for LLM-based face detection)
@@ -161,17 +164,7 @@ impl OpenAICompatibleProvider {
 
 impl LlmProvider for OpenAICompatibleProvider {
     fn describe_image(&self, image_path: &Path) -> Result<String> {
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
-
-        let mime_type = match image_path.extension().and_then(|e| e.to_str()) {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg",
-        };
-
+        let (base64_image, mime_type) = load_and_encode_image(image_path, 1024)?;
         let data_url = format!("data:{};base64,{}", mime_type, base64_image);
 
         let request = OpenAIChatRequest {
@@ -356,15 +349,45 @@ Return ONLY the JSON, no other text."#;
     }
 }
 
-/// Returns the base image description prompt
+/// Load an image, resize if either dimension exceeds `max_dimension`, re-encode as JPEG,
+/// and return the base64-encoded string along with the MIME type.
+fn load_and_encode_image(image_path: &Path, max_dimension: u32) -> Result<(String, &'static str)> {
+    let img = image::open(image_path)
+        .map_err(|e| anyhow!("Failed to open image {}: {}", image_path.display(), e))?;
+
+    let (width, height) = img.dimensions();
+    let img = if width > max_dimension || height > max_dimension {
+        img.resize(
+            max_dimension,
+            max_dimension,
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        img
+    };
+
+    let mut buf = Cursor::new(Vec::new());
+    let encoder = JpegEncoder::new_with_quality(&mut buf, 85);
+    img.write_with_encoder(encoder)
+        .map_err(|e| anyhow!("Failed to encode image as JPEG: {}", e))?;
+
+    let base64_image = BASE64.encode(buf.into_inner());
+    Ok((base64_image, "image/jpeg"))
+}
+
+/// Returns the base image description prompt.
+/// The LLM is asked to return both a description and tags in a single response,
+/// separated by a `TAGS:` delimiter line.
 fn base_image_prompt() -> &'static str {
     "Describe this image in detail. Include information about: \
      1) The main subject or scene \
      2) Notable objects, people, or elements \
      3) Colors, lighting, and mood \
      4) Any text visible in the image \
-     5) Suggested tags for organizing this photo. \
-     Keep the description concise but informative."
+     Keep the description concise but informative.\n\n\
+     After the description, on a new line write TAGS: followed by a comma-separated list \
+     of relevant tags for organizing this photo. Example format:\n\
+     TAGS: nature, sunset, mountain, landscape"
 }
 
 /// Builds the full prompt with optional custom context
@@ -462,16 +485,7 @@ impl AnthropicProvider {
 
 impl LlmProvider for AnthropicProvider {
     fn describe_image(&self, image_path: &Path) -> Result<String> {
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
-
-        let media_type = match image_path.extension().and_then(|e| e.to_str()) {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg",
-        };
+        let (base64_image, media_type) = load_and_encode_image(image_path, 1024)?;
 
         let request = AnthropicRequest {
             model: self.model.clone(),
@@ -669,8 +683,7 @@ impl OllamaProvider {
 
 impl LlmProvider for OllamaProvider {
     fn describe_image(&self, image_path: &Path) -> Result<String> {
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
+        let (base64_image, _mime_type) = load_and_encode_image(image_path, 1024)?;
 
         let request = OllamaRequest {
             model: self.model.clone(),

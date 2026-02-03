@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::TrashConfig;
 
@@ -41,9 +42,14 @@ impl TrashManager {
         Ok(())
     }
 
-    /// Generate a unique trash filename to avoid conflicts
+    /// Generate a unique trash filename to avoid conflicts.
+    /// Uses a global atomic counter to ensure uniqueness even when called
+    /// from multiple threads within the same second.
     fn generate_trash_name(&self, original: &Path) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
         let timestamp = Utc::now().timestamp();
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
         let original_name = original.file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string());
@@ -51,7 +57,7 @@ impl TrashManager {
             .map(|s| format!(".{}", s.to_string_lossy()))
             .unwrap_or_default();
 
-        let trash_name = format!("{}_{}{}", original_name, timestamp, extension);
+        let trash_name = format!("{}_{}_{}{}", original_name, timestamp, seq, extension);
         self.config.path.join(trash_name)
     }
 

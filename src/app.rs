@@ -5,10 +5,11 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::config::{Action, Config};
-use crate::db::{Database, ScheduledTaskType};
+use crate::db::{Database, ScheduledTaskType, SimilarityGroup};
 use crate::llm::LlmClient;
 use crate::scanner::{detect_changes, ChangeDetectionResult, Scanner};
 use crate::schedule::ScheduleManager;
@@ -86,6 +87,8 @@ pub struct App {
     pub g_pressed: bool,
     // Duplicates view
     pub duplicates_view: Option<DuplicatesView>,
+    // Receiver for background duplicate detection results
+    pending_duplicates: Option<mpsc::Receiver<Vec<SimilarityGroup>>>,
     // LLM state
     pub llm_client: LlmClient,
     pub llm_descriptions: HashMap<PathBuf, String>,
@@ -175,6 +178,7 @@ impl App {
             status_message: None,
             g_pressed: false,
             duplicates_view: None,
+            pending_duplicates: None,
             llm_client,
             llm_descriptions: HashMap::new(),
             image_preview,
@@ -330,8 +334,32 @@ impl App {
                     if matches!(completion.task_type, TaskType::Scan | TaskType::LlmSingle | TaskType::LlmBatch | TaskType::FaceDetection | TaskType::FaceClustering) {
                         self.image_preview.metadata_cache.clear();
                     }
+
+                    // Invalidate cached duplicates after scan (new files may create new groups)
+                    if completion.task_type == TaskType::Scan {
+                        self.duplicates_view = None;
+                    }
+
+                    // Pick up completed duplicate detection results
+                    if completion.task_type == TaskType::FindDuplicates {
+                        if let Some(rx) = self.pending_duplicates.take() {
+                            if let Ok(groups) = rx.try_recv() {
+                                if groups.is_empty() {
+                                    self.status_message = Some("No duplicates found".to_string());
+                                } else {
+                                    self.duplicates_view = Some(DuplicatesView::new(groups));
+                                    self.mode = AppMode::Duplicates;
+                                }
+                            }
+                        }
+                    }
                 } else {
                     self.status_message = Some(format!("{} - {}", prefix, completion.message));
+
+                    // Clean up receiver on failure too
+                    if completion.task_type == TaskType::FindDuplicates {
+                        self.pending_duplicates = None;
+                    }
                 }
             }
 
@@ -998,37 +1026,83 @@ impl App {
     }
 
     fn find_duplicates(&mut self) -> Result<()> {
-        self.status_message = Some("Finding duplicates...".to_string());
-
-        // Find exact duplicates (by SHA256 hash)
-        let mut all_groups = self.db.find_exact_duplicates()?;
-
-        // Find perceptual duplicates (similar images)
-        let threshold = self.config.scanner.similarity_threshold;
-        let perceptual_groups = self.db.find_perceptual_duplicates(threshold)?;
-        all_groups.extend(perceptual_groups);
-
-        if all_groups.is_empty() {
-            self.status_message = Some("No duplicates found".to_string());
+        // If we already have results, just re-enter the view
+        if self.duplicates_view.is_some() {
+            self.mode = AppMode::Duplicates;
             return Ok(());
         }
 
-        let count = all_groups.len();
-        self.duplicates_view = Some(DuplicatesView::new(all_groups));
-        self.mode = AppMode::Duplicates;
-        self.status_message = Some(format!("Found {} duplicate groups", count));
+        // Don't start if already running
+        if self.task_manager.is_running(TaskType::FindDuplicates) {
+            self.status_message = Some("Duplicate detection already running...".to_string());
+            return Ok(());
+        }
 
+        let (_task_id, tx, _cancel_flag) = self.task_manager.register_task(TaskType::FindDuplicates);
+        let db_path = self.config.db_path().clone();
+        let threshold = self.config.scanner.similarity_threshold;
+
+        // Channel to receive the computed groups
+        let (groups_tx, groups_rx) = mpsc::channel();
+        self.pending_duplicates = Some(groups_rx);
+
+        std::thread::spawn(move || {
+            let db = match Database::open(&db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Failed to open database: {}", e),
+                    });
+                    return;
+                }
+            };
+
+            let _ = tx.send(TaskUpdate::Started { total: 0 });
+
+            let mut all_groups = match db.find_exact_duplicates() {
+                Ok(g) => g,
+                Err(e) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Exact duplicate search failed: {}", e),
+                    });
+                    return;
+                }
+            };
+
+            match db.find_perceptual_duplicates(threshold) {
+                Ok(perceptual) => all_groups.extend(perceptual),
+                Err(e) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        error: format!("Perceptual duplicate search failed: {}", e),
+                    });
+                    return;
+                }
+            };
+
+            let count = all_groups.len();
+            let _ = groups_tx.send(all_groups);
+            let _ = tx.send(TaskUpdate::Completed {
+                message: format!("Found {} duplicate groups", count),
+            });
+        });
+
+        self.status_message = Some("Finding duplicates in background...".to_string());
         Ok(())
     }
 
     fn handle_duplicates_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
-            // Exit duplicates view
+            // Exit duplicates view (data preserved; press 'u' to re-enter)
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.mode = AppMode::Normal;
-                self.duplicates_view = None;
                 // Force full screen clear to remove terminal graphics artifacts
                 self.clear_on_next_render = true;
+            }
+
+            // Rescan duplicates (discard cached results)
+            KeyCode::Char('R') => {
+                self.duplicates_view = None;
+                self.find_duplicates()?;
             }
 
             // Help
@@ -1110,21 +1184,25 @@ impl App {
                             let path = PathBuf::from(&photo.path);
                             match trash_manager.move_to_trash(&path) {
                                 Ok(trash_path) => (photo.id, Some(trash_path)),
-                                Err(_) => (photo.id, None),
+                                Err(e) => {
+                                    tracing::error!(path = %photo.path, error = %e, "Failed to move file to trash");
+                                    (photo.id, None)
+                                }
                             }
                         })
                         .collect();
 
                     // Update database sequentially for successful moves
-                    let mut moved = 0;
+                    let mut moved_ids = Vec::new();
                     for (id, trash_path) in results {
                         if let Some(path) = trash_path {
                             if self.db.mark_trashed(id, &path).is_ok() {
-                                moved += 1;
+                                moved_ids.push(id);
                             }
                         }
                     }
 
+                    let moved = moved_ids.len();
                     let failed = total - moved;
                     if failed > 0 {
                         self.status_message = Some(format!(
@@ -1135,8 +1213,15 @@ impl App {
                         self.status_message = Some(format!("Moved {} files to trash", moved));
                     }
 
-                    // Refresh duplicates view
-                    self.find_duplicates()?;
+                    // Remove trashed photos from the in-memory view
+                    if let Some(ref mut view) = self.duplicates_view {
+                        view.remove_photos(&moved_ids);
+                        if view.groups.is_empty() {
+                            self.duplicates_view = None;
+                            self.mode = AppMode::Normal;
+                            self.status_message = Some("No more duplicates".to_string());
+                        }
+                    }
                 }
             }
 
@@ -1180,8 +1265,15 @@ impl App {
                         self.status_message = Some(format!("Permanently deleted {} photos", deleted_count));
                     }
 
-                    // Refresh duplicates view
-                    self.find_duplicates()?;
+                    // Remove deleted photos from the in-memory view
+                    if let Some(ref mut view) = self.duplicates_view {
+                        view.remove_photos(&deleted_ids);
+                        if view.groups.is_empty() {
+                            self.duplicates_view = None;
+                            self.mode = AppMode::Normal;
+                            self.status_message = Some("No more duplicates".to_string());
+                        }
+                    }
                 }
             }
 
