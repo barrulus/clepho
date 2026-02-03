@@ -653,6 +653,14 @@ pub struct LlmConfig {
     /// Example: "These photos are from a 1985 family reunion in Texas."
     #[serde(default)]
     pub custom_prompt: Option<String>,
+
+    /// Number of concurrent LLM requests for batch processing (default: 4)
+    #[serde(default = "default_batch_concurrency")]
+    pub batch_concurrency: usize,
+}
+
+fn default_batch_concurrency() -> usize {
+    4
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

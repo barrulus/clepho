@@ -1313,6 +1313,7 @@ impl App {
         }
 
         let total = tasks.len();
+        let concurrency = self.config.llm.batch_concurrency;
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmBatch);
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
@@ -1320,23 +1321,13 @@ impl App {
 
         // Spawn batch processing in background thread
         std::thread::spawn(move || {
-            let db = match Database::open(&db_path) {
-                Ok(db) => db,
-                Err(e) => {
-                    let _ = tx.send(TaskUpdate::Failed {
-                        error: format!("Failed to open database: {}", e),
-                    });
-                    return;
-                }
-            };
-
             let client = LlmClient::new(&endpoint, &model);
             let mut queue = crate::llm::LlmQueue::new(client);
             queue.add_tasks(tasks);
-            queue.process_all_cancellable(&db, tx, cancel_flag);
+            queue.process_all_parallel(&db_path, tx, cancel_flag, concurrency);
         });
 
-        self.status_message = Some(format!("Processing {} photos...", total));
+        self.status_message = Some(format!("Processing {} photos ({} workers)...", total, concurrency));
 
         Ok(())
     }
