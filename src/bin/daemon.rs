@@ -24,13 +24,14 @@
 
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveTime};
-use rusqlite::Connection;
-use serde::Deserialize;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, warn};
 use walkdir::WalkDir;
+
+use clepho::config::Config;
+use clepho::db::{Database, ScheduledTask, ScheduledTaskType};
 
 /// Daemon configuration
 struct DaemonConfig {
@@ -66,7 +67,8 @@ fn main() -> Result<()> {
     info!("Config loaded");
 
     // Open database
-    let db = open_database(config.db_path())?;
+    let db = Database::open(&config.database)?;
+    db.initialize()?;
     info!("Database opened at {:?}", config.db_path());
 
     // Main loop
@@ -184,128 +186,27 @@ fn init_logging() -> Result<()> {
     Ok(())
 }
 
-fn config_path() -> PathBuf {
-    // Check environment variable
-    if let Ok(path) = std::env::var("CLEPHO_CONFIG") {
-        return PathBuf::from(path);
-    }
-
-    // Default config location
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("clepho")
-        .join("config.toml")
-}
-
-/// Application config (subset needed by daemon)
-#[derive(Debug, Clone, Deserialize)]
-struct AppConfig {
-    #[serde(default)]
-    database: DatabaseConfig,
-
-    #[serde(default)]
-    llm: LlmConfig,
-
-    #[serde(default)]
-    schedule: ScheduleConfig,
-}
-
-impl AppConfig {
-    /// Get the database path (SQLite)
-    fn db_path(&self) -> &PathBuf {
-        &self.database.sqlite_path
-    }
-}
-
-/// Database configuration
-#[derive(Debug, Clone, Deserialize)]
-struct DatabaseConfig {
-    #[serde(default = "default_db_path")]
-    sqlite_path: PathBuf,
-}
-
-impl Default for DatabaseConfig {
-    fn default() -> Self {
-        Self {
-            sqlite_path: default_db_path(),
+fn load_config(daemon_config: &DaemonConfig) -> Result<Config> {
+    match &daemon_config.config_path {
+        Some(path) => {
+            Config::load_from(path)
+                .context("Failed to load config file")
+        }
+        None => {
+            Config::load()
+                .context("Failed to load config")
         }
     }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct LlmConfig {
-    #[serde(default = "default_llm_endpoint")]
-    endpoint: String,
-    #[serde(default = "default_llm_model")]
-    model: String,
-    #[serde(default)]
-    api_key: Option<String>,
-    #[serde(default)]
-    custom_prompt: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct ScheduleConfig {
-    #[serde(default)]
-    default_hours_start: Option<u8>,
-    #[serde(default)]
-    default_hours_end: Option<u8>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            database: DatabaseConfig::default(),
-            llm: LlmConfig::default(),
-            schedule: ScheduleConfig::default(),
-        }
-    }
-}
-
-fn default_db_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("clepho")
-        .join("clepho.db")
-}
-
-fn default_llm_endpoint() -> String {
-    "http://127.0.0.1:1234/v1".to_string()
-}
-
-fn default_llm_model() -> String {
-    "gemma-3-4b".to_string()
-}
-
-fn load_config(daemon_config: &DaemonConfig) -> Result<AppConfig> {
-    let path = daemon_config.config_path.clone().unwrap_or_else(config_path);
-
-    if path.exists() {
-        let content = std::fs::read_to_string(&path)
-            .context("Failed to read config file")?;
-        let config: AppConfig = toml::from_str(&content)
-            .context("Failed to parse config file")?;
-        Ok(config)
-    } else {
-        warn!("Config file not found at {:?}, using defaults", path);
-        Ok(AppConfig::default())
-    }
-}
-
-fn open_database(path: &PathBuf) -> Result<Connection> {
-    let conn = Connection::open(path)
-        .context("Failed to open database")?;
-    Ok(conn)
 }
 
 fn run_daemon_loop(
-    db: &Connection,
-    config: &AppConfig,
+    db: &Database,
+    config: &Config,
     poll_interval: u64,
 ) -> Result<()> {
     loop {
         // Check if we should process (based on hours of operation)
-        if should_process_now(&config.schedule) {
+        if should_process_now(config) {
             if let Err(e) = process_pending_tasks(db, config) {
                 error!("Error processing tasks: {}", e);
             }
@@ -318,8 +219,8 @@ fn run_daemon_loop(
     }
 }
 
-fn should_process_now(schedule: &ScheduleConfig) -> bool {
-    let (start, end) = match (schedule.default_hours_start, schedule.default_hours_end) {
+fn should_process_now(config: &Config) -> bool {
+    let (start, end) = match (config.schedule.default_hours_start, config.schedule.default_hours_end) {
         (Some(s), Some(e)) => (s, e),
         _ => return true, // No hours configured, always process
     };
@@ -337,32 +238,8 @@ fn should_process_now(schedule: &ScheduleConfig) -> bool {
     }
 }
 
-fn process_pending_tasks(db: &Connection, config: &AppConfig) -> Result<()> {
-    // Get pending tasks ordered by scheduled time
-    let mut stmt = db.prepare(
-        r#"
-        SELECT id, task_type, target_path, photo_ids, scheduled_at, hours_start, hours_end
-        FROM scheduled_tasks
-        WHERE status = 'pending'
-          AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime('now'))
-        ORDER BY scheduled_at ASC
-        LIMIT 10
-        "#
-    )?;
-
-    let tasks: Vec<PendingTask> = stmt
-        .query_map([], |row| {
-            Ok(PendingTask {
-                id: row.get(0)?,
-                task_type: row.get(1)?,
-                target_path: row.get(2)?,
-                photo_ids: row.get::<_, Option<String>>(3)?,
-                hours_start: row.get(4)?,
-                hours_end: row.get(5)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+fn process_pending_tasks(db: &Database, config: &Config) -> Result<()> {
+    let tasks = db.get_due_pending_tasks(10)?;
 
     if tasks.is_empty() {
         info!("No pending tasks");
@@ -378,13 +255,10 @@ fn process_pending_tasks(db: &Connection, config: &AppConfig) -> Result<()> {
             continue;
         }
 
-        info!("Processing task {} ({})", task.id, task.task_type);
+        info!("Processing task {} ({})", task.id, task.task_type.as_str());
 
         // Mark as running
-        db.execute(
-            "UPDATE scheduled_tasks SET status = 'running', started_at = CURRENT_TIMESTAMP WHERE id = ?",
-            [task.id],
-        )?;
+        db.mark_task_running(task.id)?;
 
         // Execute the task
         let result = execute_task(&task, config, db);
@@ -393,17 +267,11 @@ fn process_pending_tasks(db: &Connection, config: &AppConfig) -> Result<()> {
         match result {
             Ok(()) => {
                 info!("Task {} completed successfully", task.id);
-                db.execute(
-                    "UPDATE scheduled_tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    [task.id],
-                )?;
+                db.mark_task_completed(task.id)?;
             }
             Err(e) => {
                 error!("Task {} failed: {}", task.id, e);
-                db.execute(
-                    "UPDATE scheduled_tasks SET status = 'failed', error_message = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    rusqlite::params![e.to_string(), task.id],
-                )?;
+                db.mark_task_failed(task.id, &e.to_string())?;
             }
         }
     }
@@ -411,17 +279,7 @@ fn process_pending_tasks(db: &Connection, config: &AppConfig) -> Result<()> {
     Ok(())
 }
 
-struct PendingTask {
-    id: i64,
-    task_type: String,
-    target_path: String,
-    #[allow(dead_code)]
-    photo_ids: Option<String>,
-    hours_start: Option<u8>,
-    hours_end: Option<u8>,
-}
-
-fn task_within_hours(task: &PendingTask) -> bool {
+fn task_within_hours(task: &ScheduledTask) -> bool {
     let (start, end) = match (task.hours_start, task.hours_end) {
         (Some(s), Some(e)) => (s, e),
         _ => return true, // No hours configured for this task
@@ -438,19 +296,15 @@ fn task_within_hours(task: &PendingTask) -> bool {
     }
 }
 
-fn execute_task(task: &PendingTask, config: &AppConfig, db: &Connection) -> Result<()> {
-    match task.task_type.as_str() {
-        "Scan" => execute_scan_task(&task.target_path, db),
-        "LlmBatch" => execute_llm_batch_task(&task.target_path, config, db),
-        "FaceDetection" => execute_face_detection_task(&task.target_path, db),
-        _ => {
-            warn!("Unknown task type: {}", task.task_type);
-            Ok(())
-        }
+fn execute_task(task: &ScheduledTask, config: &Config, db: &Database) -> Result<()> {
+    match task.task_type {
+        ScheduledTaskType::Scan => execute_scan_task(&task.target_path, db),
+        ScheduledTaskType::LlmBatch => execute_llm_batch_task(&task.target_path, config, db),
+        ScheduledTaskType::FaceDetection => execute_face_detection_task(&task.target_path, db),
     }
 }
 
-fn execute_scan_task(target_path: &str, db: &Connection) -> Result<()> {
+fn execute_scan_task(target_path: &str, db: &Database) -> Result<()> {
     info!("Scanning directory: {}", target_path);
 
     let extensions = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif"];
@@ -476,14 +330,10 @@ fn execute_scan_task(target_path: &str, db: &Connection) -> Result<()> {
             continue;
         }
 
-        // Check if already in database
-        let exists: bool = db.query_row(
-            "SELECT 1 FROM photos WHERE path = ?",
-            [path.to_string_lossy().as_ref()],
-            |_| Ok(true),
-        ).unwrap_or(false);
+        let path_str = path.to_string_lossy();
 
-        if exists {
+        // Check if already in database
+        if db.photo_exists_by_path(&path_str) {
             continue;
         }
 
@@ -498,13 +348,7 @@ fn execute_scan_task(target_path: &str, db: &Connection) -> Result<()> {
             .map(|m| m.len() as i64)
             .unwrap_or(0);
 
-        db.execute(
-            r#"
-            INSERT OR IGNORE INTO photos (path, filename, directory, size_bytes, scanned_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            "#,
-            rusqlite::params![path.to_string_lossy().as_ref(), filename, directory, size],
-        )?;
+        db.insert_basic_photo(&path_str, &filename, &directory, size)?;
 
         count += 1;
     }
@@ -515,25 +359,13 @@ fn execute_scan_task(target_path: &str, db: &Connection) -> Result<()> {
 
 fn execute_llm_batch_task(
     target_path: &str,
-    config: &AppConfig,
-    db: &Connection,
+    config: &Config,
+    db: &Database,
 ) -> Result<()> {
     info!("Running LLM batch processing for: {}", target_path);
 
     // Get photos without descriptions in this directory
-    let mut stmt = db.prepare(
-        r#"
-        SELECT id, path
-        FROM photos
-        WHERE directory = ? AND description IS NULL
-        LIMIT 50
-        "#,
-    )?;
-
-    let photos: Vec<(i64, String)> = stmt
-        .query_map([target_path], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .filter_map(|r| r.ok())
-        .collect();
+    let photos = db.get_photos_without_description_in_directory(target_path, 50)?;
 
     if photos.is_empty() {
         info!("No photos need LLM processing");
@@ -545,10 +377,7 @@ fn execute_llm_batch_task(
     for (id, path) in photos {
         match call_llm_for_description(&path, config) {
             Ok(description) => {
-                db.execute(
-                    "UPDATE photos SET description = ?, llm_processed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    rusqlite::params![description, id],
-                )?;
+                db.save_photo_description_by_id(id, &description)?;
                 info!("Generated description for {}", path);
             }
             Err(e) => {
@@ -563,7 +392,7 @@ fn execute_llm_batch_task(
     Ok(())
 }
 
-fn call_llm_for_description(image_path: &str, config: &AppConfig) -> Result<String> {
+fn call_llm_for_description(image_path: &str, config: &Config) -> Result<String> {
     use base64::Engine;
 
     // Read and encode image
@@ -622,22 +451,13 @@ fn call_llm_for_description(image_path: &str, config: &AppConfig) -> Result<Stri
     Ok(description)
 }
 
-fn execute_face_detection_task(target_path: &str, db: &Connection) -> Result<()> {
+fn execute_face_detection_task(target_path: &str, db: &Database) -> Result<()> {
     info!("Running face detection for: {}", target_path);
 
     // Note: Full face detection requires ONNX models which are complex to set up.
     // The daemon logs what would happen but defers to the main app for actual detection.
 
-    let count: i64 = db.query_row(
-        r#"
-        SELECT COUNT(*)
-        FROM photos p
-        WHERE p.directory = ?
-          AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id)
-        "#,
-        [target_path],
-        |row| row.get(0),
-    ).unwrap_or(0);
+    let count = db.count_photos_without_faces_in_dir(target_path)?;
 
     if count == 0 {
         info!("No photos need face detection");

@@ -5,8 +5,19 @@ Clepho's configuration is stored at `~/.config/clepho/config.toml`. The file is 
 ## Complete Configuration Reference
 
 ```toml
-# Database location
-db_path = "~/.local/share/clepho/clepho.db"
+[database]
+# Backend: "sqlite" (default) or "postgresql"
+backend = "sqlite"
+
+# SQLite database path (used when backend = "sqlite")
+sqlite_path = "~/.local/share/clepho/clepho.db"
+
+# PostgreSQL connection URL (used when backend = "postgresql")
+# Requires building with: cargo build --features postgres
+# postgresql_url = "postgresql://user:password@localhost:5432/clepho"
+
+# Connection pool size for PostgreSQL (default: 10)
+# pool_size = 10
 
 [llm]
 # LLM provider: lmstudio, ollama, openai, anthropic
@@ -79,12 +90,45 @@ check_overdue_on_startup = true
 
 ## Section Details
 
-### Database (`db_path`)
+### Database (`[database]`)
 
-The SQLite database stores all metadata, descriptions, face data, and scheduled tasks.
+The database stores all metadata, descriptions, face data, and scheduled tasks.
 
-- **Default:** `~/.local/share/clepho/clepho.db`
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `backend` | `"sqlite"` | `"sqlite"` or `"postgresql"` |
+| `sqlite_path` | `~/.local/share/clepho/clepho.db` | Path to SQLite database file |
+| `postgresql_url` | (none) | PostgreSQL connection string |
+| `pool_size` | `10` | Connection pool size (PostgreSQL only) |
+
+#### SQLite (default)
+
+- Single file, no server required
+- Good for single-user, local use
 - **Tip:** Use an SSD location for best performance with large collections
+
+#### PostgreSQL
+
+Requires building with the `postgres` feature flag:
+
+```bash
+cargo build --release --features postgres
+```
+
+Configure in `config.toml`:
+```toml
+[database]
+backend = "postgresql"
+postgresql_url = "postgresql://user:password@localhost:5432/clepho"
+pool_size = 10
+```
+
+To migrate an existing SQLite database to PostgreSQL:
+```bash
+clepho --migrate-to-postgres "postgresql://user:password@localhost:5432/clepho"
+```
+
+See [database.md](database.md) for more details
 
 ### LLM Configuration (`[llm]`)
 
@@ -254,9 +298,6 @@ pattern = "{year}/{month}"
 Some settings can be overridden via environment variables:
 
 ```bash
-# Override database path
-CLEPHO_DB_PATH=/path/to/db.sqlite clepho
-
 # Override config file location
 CLEPHO_CONFIG=/path/to/config.toml clepho
 ```
@@ -283,8 +324,15 @@ protocol = "halfblocks"  # Less CPU-intensive
 
 ### Network Storage
 ```toml
-# Use local database even for network photos
-db_path = "~/.local/share/clepho/clepho.db"
+# Use local SQLite database even for network photos
+[database]
+backend = "sqlite"
+sqlite_path = "~/.local/share/clepho/clepho.db"
+
+# Or use PostgreSQL for multi-machine access
+# [database]
+# backend = "postgresql"
+# postgresql_url = "postgresql://user:password@dbserver:5432/clepho"
 
 [thumbnails]
 # Keep thumbnails local for speed

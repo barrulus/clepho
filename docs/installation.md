@@ -26,8 +26,11 @@
 git clone <repository-url>
 cd clepho
 
-# Build release version
+# Build release version (SQLite only)
 cargo build --release
+
+# Build with PostgreSQL support
+cargo build --release --features postgres
 
 # Binary location
 ./target/release/clepho
@@ -113,7 +116,7 @@ On first launch, Clepho will:
 1. Create configuration directory at `~/.config/clepho/`
 2. Create default configuration file `config.toml`
 3. Create data directory at `~/.local/share/clepho/`
-4. Initialize SQLite database `clepho.db`
+4. Initialize database (SQLite by default at `clepho.db`)
 5. Create thumbnail cache at `~/.cache/clepho/thumbnails/`
 6. Create trash directory at `~/.local/share/clepho/.trash/`
 

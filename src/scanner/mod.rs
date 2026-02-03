@@ -120,7 +120,7 @@ impl Scanner {
         for (path, result) in scanned_photos {
             match result {
                 Ok(photo) => {
-                    match self.photo_exists(db, &path) {
+                    match db.photo_exists(&path) {
                         Ok(exists) => {
                             if exists {
                                 if let Err(e) = self.update_photo(db, &photo) {
@@ -182,15 +182,14 @@ impl Scanner {
         let hashes = hashing::calculate_hashes(path).ok();
 
         // Generate thumbnail with EXIF rotation applied
-        // Convert EXIF orientation (1-8) to rotation degrees
         let rotation_degrees = metadata
             .as_ref()
             .and_then(|m| m.orientation)
             .map(|o| match o {
-                3 => 180,  // Rotate 180
-                6 => 90,   // Rotate 90 CW
-                8 => 270,  // Rotate 90 CCW (270 CW)
-                _ => 0,    // Normal or flipped (we ignore flips for now)
+                3 => 180,
+                6 => 90,
+                8 => 270,
+                _ => 0,
             })
             .unwrap_or(0);
         let _ = self.thumbnail_manager.generate(path, rotation_degrees);
@@ -206,16 +205,6 @@ impl Scanner {
         })
     }
 
-    fn photo_exists(&self, db: &Database, path: &PathBuf) -> Result<bool> {
-        let path_str = path.to_string_lossy();
-        let count: i64 = db.conn().query_row(
-            "SELECT COUNT(*) FROM photos WHERE path = ?",
-            [path_str.as_ref()],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
-    }
-
     fn insert_photo(&self, db: &Database, photo: &ScannedPhoto) -> Result<()> {
         let path_str = photo.path.to_string_lossy();
 
@@ -224,18 +213,18 @@ impl Scanner {
                 (
                     meta.width,
                     meta.height,
-                    meta.format.clone(),
-                    meta.camera_make.clone(),
-                    meta.camera_model.clone(),
-                    meta.lens.clone(),
+                    meta.format.as_deref(),
+                    meta.camera_make.as_deref(),
+                    meta.camera_model.as_deref(),
+                    meta.lens.as_deref(),
                     meta.focal_length,
                     meta.aperture,
-                    meta.shutter_speed.clone(),
+                    meta.shutter_speed.as_deref(),
                     meta.iso,
-                    meta.taken_at.clone(),
+                    meta.taken_at.as_deref(),
                     meta.gps_latitude,
                     meta.gps_longitude,
-                    meta.all_exif.clone(),
+                    meta.all_exif.as_deref(),
                     meta.orientation,
                 )
             } else {
@@ -244,53 +233,26 @@ impl Scanner {
 
         let (md5_hash, sha256_hash, perceptual_hash) = if let Some(ref hashes) = photo.hashes {
             (
-                Some(hashes.md5.clone()),
-                Some(hashes.sha256.clone()),
-                hashes.perceptual.clone(),
+                Some(hashes.md5.as_str()),
+                Some(hashes.sha256.as_str()),
+                hashes.perceptual.as_deref(),
             )
         } else {
             (None, None, None)
         };
 
-        db.conn().execute(
-            r#"
-            INSERT INTO photos (
-                path, filename, directory, size_bytes, modified_at,
-                width, height, format,
-                camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at,
-                gps_latitude, gps_longitude, all_exif,
-                md5_hash, sha256_hash, perceptual_hash,
-                exif_orientation
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-            rusqlite::params![
-                path_str.as_ref(),
-                photo.filename,
-                photo.directory,
-                photo.size_bytes as i64,
-                photo.modified_at,
-                width,
-                height,
-                format,
-                camera_make,
-                camera_model,
-                lens,
-                focal_length,
-                aperture,
-                shutter_speed,
-                iso,
-                taken_at,
-                gps_lat,
-                gps_lon,
-                all_exif,
-                md5_hash,
-                sha256_hash,
-                perceptual_hash,
-                orientation.unwrap_or(1) as i32,
-            ],
-        )?;
-
-        Ok(())
+        db.insert_scanned_photo(
+            path_str.as_ref(),
+            &photo.filename,
+            &photo.directory,
+            photo.size_bytes as i64,
+            photo.modified_at.as_deref(),
+            width, height, format,
+            camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso.map(|v| v as i64), taken_at,
+            gps_lat, gps_lon, all_exif,
+            md5_hash, sha256_hash, perceptual_hash,
+            orientation.unwrap_or(1) as i32,
+        )
     }
 
     fn update_photo(&self, db: &Database, photo: &ScannedPhoto) -> Result<()> {
@@ -301,18 +263,18 @@ impl Scanner {
                 (
                     meta.width,
                     meta.height,
-                    meta.format.clone(),
-                    meta.camera_make.clone(),
-                    meta.camera_model.clone(),
-                    meta.lens.clone(),
+                    meta.format.as_deref(),
+                    meta.camera_make.as_deref(),
+                    meta.camera_model.as_deref(),
+                    meta.lens.as_deref(),
                     meta.focal_length,
                     meta.aperture,
-                    meta.shutter_speed.clone(),
+                    meta.shutter_speed.as_deref(),
                     meta.iso,
-                    meta.taken_at.clone(),
+                    meta.taken_at.as_deref(),
                     meta.gps_latitude,
                     meta.gps_longitude,
-                    meta.all_exif.clone(),
+                    meta.all_exif.as_deref(),
                     meta.orientation,
                 )
             } else {
@@ -321,54 +283,26 @@ impl Scanner {
 
         let (md5_hash, sha256_hash, perceptual_hash) = if let Some(ref hashes) = photo.hashes {
             (
-                Some(hashes.md5.clone()),
-                Some(hashes.sha256.clone()),
-                hashes.perceptual.clone(),
+                Some(hashes.md5.as_str()),
+                Some(hashes.sha256.as_str()),
+                hashes.perceptual.as_deref(),
             )
         } else {
             (None, None, None)
         };
 
-        db.conn().execute(
-            r#"
-            UPDATE photos SET
-                filename = ?, directory = ?, size_bytes = ?, modified_at = ?,
-                width = ?, height = ?, format = ?,
-                camera_make = ?, camera_model = ?, lens = ?, focal_length = ?, aperture = ?, shutter_speed = ?, iso = ?, taken_at = ?,
-                gps_latitude = ?, gps_longitude = ?, all_exif = ?,
-                md5_hash = ?, sha256_hash = ?, perceptual_hash = ?,
-                exif_orientation = ?,
-                scanned_at = CURRENT_TIMESTAMP
-            WHERE path = ?
-            "#,
-            rusqlite::params![
-                photo.filename,
-                photo.directory,
-                photo.size_bytes as i64,
-                photo.modified_at,
-                width,
-                height,
-                format,
-                camera_make,
-                camera_model,
-                lens,
-                focal_length,
-                aperture,
-                shutter_speed,
-                iso,
-                taken_at,
-                gps_lat,
-                gps_lon,
-                all_exif,
-                md5_hash,
-                sha256_hash,
-                perceptual_hash,
-                orientation.unwrap_or(1) as i32,
-                path_str.as_ref(),
-            ],
-        )?;
-
-        Ok(())
+        db.update_scanned_photo(
+            path_str.as_ref(),
+            &photo.filename,
+            &photo.directory,
+            photo.size_bytes as i64,
+            photo.modified_at.as_deref(),
+            width, height, format,
+            camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso.map(|v| v as i64), taken_at,
+            gps_lat, gps_lon, all_exif,
+            md5_hash, sha256_hash, perceptual_hash,
+            orientation.unwrap_or(1) as i32,
+        )
     }
 }
 

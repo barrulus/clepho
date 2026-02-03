@@ -36,9 +36,12 @@ A terminal-based photo manager with AI-powered features. Browse, organize, and c
 ## Quick Start
 
 ```bash
-# Build from source
+# Build from source (SQLite)
 cargo build --release
 ./target/release/clepho
+
+# Build with PostgreSQL support
+cargo build --release --features postgres
 
 # Or run directly with Nix (no install)
 nix run github:barrulus/clepho
@@ -87,6 +90,7 @@ See [config.example.toml](config.example.toml) for all options or [docs/configur
 | [Faces](docs/faces.md) | Face detection and people |
 | [File Operations](docs/file-operations.md) | Move, rename, and organize |
 | [Centralise](docs/centralise.md) | Organize photos into library |
+| [Database](docs/database.md) | SQLite, PostgreSQL, and migration |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Complete keybinding reference |
 
 ## License

@@ -1,6 +1,6 @@
 # Running Clepho
 
-Clepho has two binaries: the **TUI** (`clepho`) for interactive use, and the **daemon** (`clepho-daemon`) for background task processing. They share the same SQLite database and configuration file.
+Clepho has two binaries: the **TUI** (`clepho`) for interactive use, and the **daemon** (`clepho-daemon`) for background task processing. They share the same database (SQLite or PostgreSQL) and configuration file.
 
 ## The TUI (`clepho`)
 
@@ -18,9 +18,10 @@ The TUI handles all interactive features: browsing, scanning, AI descriptions, f
 clepho [OPTIONS]
 
 OPTIONS:
-    --config, -c PATH   Path to config file
-    --version, -V       Show version
-    --help, -h          Show this help message
+    --config, -c PATH                 Path to config file
+    --migrate-to-postgres URL         Migrate SQLite database to PostgreSQL
+    --version, -V                     Show version
+    --help, -h                        Show this help message
 ```
 
 ## The Daemon (`clepho-daemon`)
@@ -61,7 +62,7 @@ If you only use Clepho interactively and trigger tasks manually, you don't need 
 
 ### How the TUI and daemon cooperate
 
-Both binaries read and write the same SQLite database (default: `~/.local/share/clepho/clepho.db`) and share the same config file (default: `~/.config/clepho/config.toml`).
+Both binaries read and write the same database (SQLite or PostgreSQL, as configured) and share the same config file (default: `~/.config/clepho/config.toml`).
 
 ```
 ┌────────────┐         ┌──────────────┐
@@ -70,7 +71,7 @@ Both binaries read and write the same SQLite database (default: `~/.local/share/
 └─────┬──────┘         └──────┬───────┘
       │                       │
       │   ┌───────────────┐   │
-      └──►│  SQLite DB    │◄──┘
+      └──►│  Database     │◄──┘
           │  config.toml  │
           └───────────────┘
 ```

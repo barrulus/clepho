@@ -73,6 +73,10 @@ pub struct DatabaseConfig {
     /// Example: "postgresql://user:password@localhost:5432/clepho"
     #[serde(default)]
     pub postgresql_url: Option<String>,
+
+    /// Connection pool size for PostgreSQL (default: 10)
+    #[serde(default)]
+    pub pool_size: Option<u32>,
 }
 
 impl Default for DatabaseConfig {
@@ -81,6 +85,7 @@ impl Default for DatabaseConfig {
             backend: DatabaseType::default(),
             sqlite_path: default_db_path(),
             postgresql_url: None,
+            pool_size: None,
         }
     }
 }

@@ -1,6 +1,9 @@
 # Database
 
-Clepho uses SQLite to store all photo metadata, AI descriptions, face data, and scheduled tasks.
+Clepho stores all photo metadata, AI descriptions, face data, and scheduled tasks in a database. Two backends are supported:
+
+- **SQLite** (default) - Single-file, zero-configuration
+- **PostgreSQL** (optional) - Multi-user, network-accessible, requires the `postgres` feature flag
 
 ## Overview
 
@@ -9,16 +12,40 @@ The database provides:
 1. **Persistent storage** - Data survives between sessions
 2. **Fast queries** - Indexed for quick lookups
 3. **ACID compliance** - Reliable transactions
-4. **Single file** - Easy to backup
+4. **Backend flexibility** - Choose SQLite for simplicity or PostgreSQL for scale
 
-## Location
+## Backend Selection
 
-Default: `~/.local/share/clepho/clepho.db`
+Configure in `config.toml`:
 
-Configurable in `config.toml`:
 ```toml
-db_path = "/path/to/custom/clepho.db"
+[database]
+# Backend: "sqlite" (default) or "postgresql"
+backend = "sqlite"
+
+# SQLite database path (used when backend = "sqlite")
+sqlite_path = "~/.local/share/clepho/clepho.db"
+
+# PostgreSQL connection URL (used when backend = "postgresql")
+# Requires building with: cargo build --features postgres
+# postgresql_url = "postgresql://user:password@localhost:5432/clepho"
+
+# Connection pool size for PostgreSQL (default: 10)
+# pool_size = 10
 ```
+
+### SQLite (default)
+
+- Single file at `~/.local/share/clepho/clepho.db`
+- No setup required
+- Good for single-user, local use
+
+### PostgreSQL
+
+- Requires building with `cargo build --features postgres`
+- Connection pooling via r2d2 (configurable pool size)
+- Better for multi-machine setups or large collections
+- See [Migrating to PostgreSQL](#migrating-to-postgresql) below
 
 ## Schema Overview
 
@@ -302,6 +329,7 @@ ORDER BY taken_at DESC;
 
 ### Backup
 
+**SQLite:**
 ```bash
 # Simple copy
 cp ~/.local/share/clepho/clepho.db ~/backup/clepho_backup.db
@@ -310,24 +338,42 @@ cp ~/.local/share/clepho/clepho.db ~/backup/clepho_backup.db
 sqlite3 ~/.local/share/clepho/clepho.db ".backup ~/backup/clepho_backup.db"
 ```
 
+**PostgreSQL:**
+```bash
+pg_dump clepho > ~/backup/clepho_backup.sql
+```
+
 ### Vacuum
 
 Reclaim space after deletions:
 
+**SQLite:**
 ```bash
 sqlite3 ~/.local/share/clepho/clepho.db "VACUUM;"
 ```
 
+**PostgreSQL:**
+```bash
+psql -d clepho -c "VACUUM ANALYZE;"
+```
+
 ### Integrity Check
 
+**SQLite:**
 ```bash
 sqlite3 ~/.local/share/clepho/clepho.db "PRAGMA integrity_check;"
 ```
 
 ### Size Check
 
+**SQLite:**
 ```bash
 ls -lh ~/.local/share/clepho/clepho.db
+```
+
+**PostgreSQL:**
+```bash
+psql -d clepho -c "SELECT pg_size_pretty(pg_database_size('clepho'));"
 ```
 
 ## Direct Access
@@ -342,6 +388,16 @@ sqlite3 ~/.local/share/clepho/clepho.db
 .schema photos   -- Show table schema
 .headers on      -- Show column headers
 .mode column     -- Column output format
+```
+
+### PostgreSQL CLI
+
+```bash
+psql "postgresql://user:password@localhost:5432/clepho"
+
+# Useful commands
+\dt              -- List all tables
+\d photos        -- Show table schema
 ```
 
 ### Example Queries
@@ -370,16 +426,52 @@ ORDER BY scanned_at DESC
 LIMIT 20;
 ```
 
-## Migration
+## Migrating to PostgreSQL
 
-### Schema Updates
+Clepho includes a built-in migration tool that copies all data from SQLite to PostgreSQL, preserving IDs and relationships.
+
+### Prerequisites
+
+1. Build with PostgreSQL support: `cargo build --release --features postgres`
+2. Create a PostgreSQL database: `createdb clepho`
+3. Have access to your existing SQLite database
+
+### Running the Migration
+
+```bash
+# Migrate using the default config (reads sqlite_path from config.toml)
+clepho --migrate-to-postgres "postgresql://user:password@localhost:5432/clepho"
+
+# Or specify a custom config file
+clepho -c /path/to/config.toml --migrate-to-postgres "postgresql://user:password@localhost:5432/clepho"
+```
+
+The migration:
+- Creates the PostgreSQL schema (tables and indexes)
+- Copies all 16 tables in foreign-key-safe order
+- Preserves original row IDs
+- Resets PostgreSQL sequences for correct auto-increment
+- Uses `ON CONFLICT DO NOTHING`, so it's safe to re-run
+
+### After Migration
+
+Update your config to use PostgreSQL:
+
+```toml
+[database]
+backend = "postgresql"
+postgresql_url = "postgresql://user:password@localhost:5432/clepho"
+pool_size = 10
+```
+
+## Schema Updates
 
 Clepho automatically migrates the schema on startup:
 - New columns added with defaults
 - New tables created
 - Indexes added
 
-### Manual Migration
+### Manual Migration (SQLite)
 
 If needed, you can add columns manually:
 
@@ -421,7 +513,7 @@ Typical sizes:
 
 ## Troubleshooting
 
-### Database Locked
+### Database Locked (SQLite)
 
 ```
 Error: database is locked
@@ -432,7 +524,19 @@ Error: database is locked
 - Close SQLite CLI sessions
 - Check for zombie processes
 
-### Corrupt Database
+### Connection Refused (PostgreSQL)
+
+```
+Error: Failed to connect to PostgreSQL
+```
+
+**Solutions:**
+- Verify PostgreSQL is running: `pg_isready`
+- Check the connection URL in config.toml
+- Ensure the database exists: `createdb clepho`
+- Check firewall/pg_hba.conf for access
+
+### Corrupt Database (SQLite)
 
 ```
 Error: database disk image is malformed
@@ -451,8 +555,8 @@ sqlite3 corrupt.db ".dump" | sqlite3 new.db
 ### Slow Queries
 
 - Check indexes exist
-- Run VACUUM
-- Consider splitting large collections
+- Run VACUUM (SQLite) or VACUUM ANALYZE (PostgreSQL)
+- For PostgreSQL, consider increasing `pool_size` if many concurrent operations
 
 ### Missing Data
 

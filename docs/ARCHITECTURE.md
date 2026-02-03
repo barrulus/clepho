@@ -8,7 +8,10 @@ Clepho is a TUI photo management application built in Rust using the Ratatui fra
 
 ```
 src/
-├── main.rs              # Entry point, terminal setup
+├── lib.rs               # Library crate (shared config + db modules)
+├── main.rs              # TUI binary entry point, terminal setup
+├── bin/
+│   └── daemon.rs        # Background daemon binary
 ├── app.rs               # Application state and event loop
 ├── config.rs            # Configuration management
 ├── ui/
@@ -19,9 +22,18 @@ src/
 │   ├── duplicates.rs    # Duplicates view
 │   └── status_bar.rs    # Status bar
 ├── db/
-│   ├── mod.rs           # Database connection management
+│   ├── mod.rs           # Database enum dispatch wrapper
 │   ├── schema.rs        # SQLite schema definition
-│   └── similarity.rs    # Duplicate detection queries
+│   ├── sqlite.rs        # SQLite backend implementation
+│   ├── postgres.rs      # PostgreSQL backend (feature-gated)
+│   ├── postgres_schema.rs # PostgreSQL schema definition (feature-gated)
+│   ├── migrate.rs       # SQLite-to-PostgreSQL migration (feature-gated)
+│   ├── similarity.rs    # Duplicate detection types + helpers
+│   ├── faces.rs         # Face/person types + helpers
+│   ├── embeddings.rs    # Embedding types + helpers
+│   ├── albums.rs        # Album/tag types
+│   ├── trash.rs         # Trash types
+│   └── schedule.rs      # Schedule types
 ├── scanner/
 │   ├── mod.rs           # Scanner coordination
 │   ├── discovery.rs     # File discovery (walkdir)
@@ -61,12 +73,20 @@ Rendering is handled by the `ui::render()` function which:
 
 ### Database (`db/`)
 
-SQLite database with tables for:
+The database layer uses an **enum dispatch** pattern to support multiple backends behind a single `Database` API. A `DatabaseInner` enum wraps either `SqliteDb` or `PgDb`, and a `dispatch!` macro forwards all method calls to the active backend. Callers never interact with a specific backend directly.
+
+- **SQLite** (`sqlite.rs`) - Default backend, uses `rusqlite`
+- **PostgreSQL** (`postgres.rs`) - Optional, behind `postgres` feature flag, uses `r2d2` connection pooling
+
+Tables:
 - `photos` - Core photo metadata, hashes, LLM descriptions
-- `similarity_groups` - Duplicate/similar photo clusters
-- `photo_similarity` - Photo-to-group mappings
+- `people`, `faces`, `face_clusters` - Face detection and recognition
+- `embeddings` - CLIP/vision embeddings for semantic search
+- `similarity_groups`, `photo_similarity` - Duplicate/similar photo clusters
+- `user_tags`, `photo_user_tags`, `albums`, `album_photos` - Organization
 - `scans` - Scan history
 - `llm_queue` - LLM processing queue
+- `scheduled_tasks` - Background task scheduling
 
 ### Scanner (`scanner/`)
 
@@ -123,9 +143,13 @@ User presses 'd'
 - Background threads: Scanning, LLM requests
 - Communication: std::sync::mpsc channels
 
+### Library Crate (`lib.rs`)
+
+The `config` and `db` modules live in the library crate (`src/lib.rs`) so they can be shared between both binaries (TUI and daemon) without duplication.
+
 ## Configuration
 
 TOML configuration at `~/.config/clepho/config.toml`:
-- Database path
+- Database backend and connection settings
 - LLM endpoint and model
 - Scanner settings (extensions, similarity threshold)

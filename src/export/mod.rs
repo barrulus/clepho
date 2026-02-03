@@ -65,52 +65,21 @@ pub fn export_photos(db: &Database, output_path: &Path, format: ExportFormat) ->
 }
 
 fn get_photos_for_export(db: &Database) -> Result<Vec<ExportedPhoto>> {
-    let mut stmt = db.conn.prepare(
-        r#"
-        SELECT
-            path,
-            width,
-            height,
-            file_size,
-            sha256,
-            perceptual_hash,
-            camera_make,
-            camera_model,
-            date_taken,
-            description,
-            scanned_at
-        FROM photos
-        ORDER BY path
-        "#,
-    )?;
-
-    let photos = stmt
-        .query_map([], |row| {
-            let path: String = row.get(0)?;
-            let filename = std::path::Path::new(&path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            Ok(ExportedPhoto {
-                path,
-                filename,
-                width: row.get(1)?,
-                height: row.get(2)?,
-                file_size: row.get(3)?,
-                sha256: row.get(4)?,
-                perceptual_hash: row.get(5)?,
-                camera_make: row.get(6)?,
-                camera_model: row.get(7)?,
-                date_taken: row.get(8)?,
-                description: row.get(9)?,
-                scanned_at: row.get(10)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(photos)
+    let rows = db.get_photos_for_export()?;
+    Ok(rows.into_iter().map(|r| ExportedPhoto {
+        path: r.path,
+        filename: r.filename,
+        width: r.width,
+        height: r.height,
+        file_size: r.file_size,
+        sha256: r.sha256,
+        perceptual_hash: r.perceptual_hash,
+        camera_make: r.camera_make,
+        camera_model: r.camera_model,
+        date_taken: r.date_taken,
+        description: r.description,
+        scanned_at: r.scanned_at,
+    }).collect())
 }
 
 fn export_json(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {

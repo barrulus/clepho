@@ -1,8 +1,6 @@
 mod app;
 mod centralise;
 mod clip;
-mod config;
-mod db;
 mod export;
 mod faces;
 mod llm;
@@ -12,6 +10,11 @@ mod schedule;
 mod tasks;
 mod trash;
 mod ui;
+
+// Re-export shared modules from library crate so binary submodules
+// can use them via `crate::config` and `crate::db`.
+pub(crate) use clepho::config;
+pub(crate) use clepho::db;
 
 use anyhow::Result;
 use crossterm::{
@@ -26,9 +29,17 @@ use std::path::PathBuf;
 use app::App;
 use config::Config;
 
-fn parse_args() -> Option<PathBuf> {
+enum CliAction {
+    RunTui(Option<PathBuf>),
+    #[cfg(feature = "postgres")]
+    MigrateToPostgres { config_path: Option<PathBuf>, postgres_url: String },
+}
+
+fn parse_args() -> CliAction {
     let args: Vec<String> = std::env::args().collect();
     let mut config_path = None;
+    #[cfg(feature = "postgres")]
+    let mut migrate_url: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -50,6 +61,22 @@ fn parse_args() -> Option<PathBuf> {
                     std::process::exit(1);
                 }
             }
+            #[cfg(feature = "postgres")]
+            "--migrate-to-postgres" => {
+                if i + 1 < args.len() {
+                    migrate_url = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    eprintln!("Error: --migrate-to-postgres requires a PostgreSQL URL argument");
+                    std::process::exit(1);
+                }
+            }
+            #[cfg(not(feature = "postgres"))]
+            "--migrate-to-postgres" => {
+                eprintln!("Error: --migrate-to-postgres requires the 'postgres' feature");
+                eprintln!("Rebuild with: cargo build --features postgres");
+                std::process::exit(1);
+            }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
                 print_help();
@@ -59,7 +86,12 @@ fn parse_args() -> Option<PathBuf> {
         i += 1;
     }
 
-    config_path
+    #[cfg(feature = "postgres")]
+    if let Some(url) = migrate_url {
+        return CliAction::MigrateToPostgres { config_path, postgres_url: url };
+    }
+
+    CliAction::RunTui(config_path)
 }
 
 fn print_help() {
@@ -70,9 +102,10 @@ USAGE:
     clepho [OPTIONS]
 
 OPTIONS:
-    --config, -c PATH   Path to config file
-    --version, -V       Show version
-    --help, -h          Show this help message
+    --config, -c PATH                 Path to config file
+    --migrate-to-postgres URL         Migrate SQLite database to PostgreSQL (requires postgres feature)
+    --version, -V                     Show version
+    --help, -h                        Show this help message
 
 ENVIRONMENT:
     CLEPHO_CONFIG       Path to config file (overrides default location)
@@ -86,40 +119,56 @@ See also: clepho-daemon --help"#
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config_path = parse_args();
+    let action = parse_args();
 
     // Initialize logging (uses journald on Linux, file fallback otherwise)
     let _ = logging::init(Some(Config::config_dir().join("logs")));
 
-    // Load configuration
-    let config = match config_path {
-        Some(path) => Config::load_from(&path)?,
-        None => Config::load()?,
-    };
+    match action {
+        CliAction::RunTui(config_path) => {
+            // Load configuration
+            let config = match config_path {
+                Some(path) => Config::load_from(&path)?,
+                None => Config::load()?,
+            };
 
-    // Initialize database
-    let db = db::Database::open(&config.db_path())?;
-    db.initialize()?;
+            // Initialize database
+            let db = db::Database::open(&config.database)?;
+            db.initialize()?;
 
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+            // Setup terminal
+            enable_raw_mode()?;
+            let mut stdout = io::stdout();
+            execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+            let backend = CrosstermBackend::new(stdout);
+            let mut terminal = Terminal::new(backend)?;
 
-    // Create and run app
-    let mut app = App::new(config, db)?;
-    let result = app.run(&mut terminal).await;
+            // Create and run app
+            let mut app = App::new(config, db)?;
+            let result = app.run(&mut terminal).await;
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+            // Restore terminal
+            disable_raw_mode()?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
+            terminal.show_cursor()?;
 
-    result
+            result
+        }
+        #[cfg(feature = "postgres")]
+        CliAction::MigrateToPostgres { config_path, postgres_url } => {
+            let config = match config_path {
+                Some(path) => Config::load_from(&path)?,
+                None => Config::load()?,
+            };
+
+            let sqlite_path = &config.database.sqlite_path;
+            eprintln!("Migrating from SQLite ({}) to PostgreSQL...", sqlite_path.display());
+            db::migrate::migrate_sqlite_to_postgres(sqlite_path, &postgres_url)?;
+            Ok(())
+        }
+    }
 }

@@ -2,8 +2,19 @@
 # Copy to ~/.config/clepho/config.toml
 # See docs/configuration.md for full documentation
 
-# Database location
-db_path = "~/.local/share/clepho/clepho.db"
+[database]
+# Backend: "sqlite" (default) or "postgresql"
+backend = "sqlite"
+
+# SQLite database path (used when backend = "sqlite")
+sqlite_path = "~/.local/share/clepho/clepho.db"
+
+# PostgreSQL connection URL (used when backend = "postgresql")
+# Requires building with: cargo build --features postgres
+# postgresql_url = "postgresql://user:password@localhost:5432/clepho"
+
+# Connection pool size for PostgreSQL (default: 10)
+# pool_size = 10
 
 [llm]
 # Provider: lmstudio, ollama, openai, anthropic

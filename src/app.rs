@@ -995,11 +995,11 @@ impl App {
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::Scan);
         let dir = self.current_dir.clone();
         let config = self.config.clone();
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
 
         // Spawn scanning in a background thread
         std::thread::spawn(move || {
-            let db = match Database::open(&db_path) {
+            let db = match Database::open(&db_config) {
                 Ok(db) => db,
                 Err(e) => {
                     let _ = tx.send(TaskUpdate::Failed {
@@ -1039,7 +1039,7 @@ impl App {
         }
 
         let (_task_id, tx, _cancel_flag) = self.task_manager.register_task(TaskType::FindDuplicates);
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
         let threshold = self.config.scanner.similarity_threshold;
 
         // Channel to receive the computed groups
@@ -1047,7 +1047,7 @@ impl App {
         self.pending_duplicates = Some(groups_rx);
 
         std::thread::spawn(move || {
-            let db = match Database::open(&db_path) {
+            let db = match Database::open(&db_config) {
                 Ok(db) => db,
                 Err(e) => {
                     let _ = tx.send(TaskUpdate::Failed {
@@ -1353,7 +1353,7 @@ impl App {
         let path = entry.path.clone();
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
 
         // Spawn LLM request in background thread
         std::thread::spawn(move || {
@@ -1369,7 +1369,7 @@ impl App {
             match client.describe_image(&path) {
                 Ok(description) => {
                     // Save to database
-                    if let Ok(db) = Database::open(&db_path) {
+                    if let Ok(db) = Database::open(&db_config) {
                         let _ = db.save_description(&path, &description);
                     }
                     let _ = tx.send(TaskUpdate::Completed {
@@ -1397,7 +1397,10 @@ impl App {
         }
 
         // Get photos without descriptions in current directory
-        let tasks = self.db.get_photos_without_description_in_dir(&self.current_dir)?;
+        let task_rows = self.db.get_photos_without_description_in_dir(&self.current_dir)?;
+        let tasks: Vec<crate::llm::LlmTask> = task_rows.into_iter().map(|(id, path)| {
+            crate::llm::LlmTask { photo_id: id, photo_path: PathBuf::from(path) }
+        }).collect();
 
         if tasks.is_empty() {
             self.status_message = Some("No unprocessed photos in this directory".to_string());
@@ -1409,14 +1412,14 @@ impl App {
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmBatch);
         let endpoint = self.config.llm.endpoint.clone();
         let model = self.config.llm.model.clone();
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
 
         // Spawn batch processing in background thread
         std::thread::spawn(move || {
             let client = LlmClient::new(&endpoint, &model);
             let mut queue = crate::llm::LlmQueue::new(client);
             queue.add_tasks(tasks);
-            queue.process_all_parallel(&db_path, tx, cancel_flag, concurrency);
+            queue.process_all_parallel(&db_config, tx, cancel_flag, concurrency);
         });
 
         self.status_message = Some(format!("Processing {} photos ({} workers)...", total, concurrency));
@@ -1965,11 +1968,11 @@ impl App {
 
         let total = photos.len();
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::FaceDetection);
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
 
         // Spawn face scanning in background thread using dlib
         std::thread::spawn(move || {
-            let db = match crate::db::Database::open(&db_path) {
+            let db = match crate::db::Database::open(&db_config) {
                 Ok(db) => db,
                 Err(e) => {
                     let _ = tx.send(TaskUpdate::Failed {
@@ -2002,11 +2005,11 @@ impl App {
         // Use a default threshold of 0.6 for face similarity
         let threshold = 0.6;
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::FaceClustering);
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
 
         // Spawn clustering in background thread
         std::thread::spawn(move || {
-            let db = match crate::db::Database::open(&db_path) {
+            let db = match crate::db::Database::open(&db_config) {
                 Ok(db) => db,
                 Err(e) => {
                     let _ = tx.send(crate::tasks::TaskUpdate::Failed {
@@ -2046,7 +2049,7 @@ impl App {
 
         let total = photos.len();
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::ClipEmbedding);
-        let db_path = self.config.db_path().clone();
+        let db_config = self.config.database.clone();
 
         // Spawn CLIP embedding in background thread
         std::thread::spawn(move || {
@@ -2054,7 +2057,7 @@ impl App {
             use crate::clip::ClipModel;
             use std::sync::atomic::Ordering;
 
-            let db = match crate::db::Database::open(&db_path) {
+            let db = match crate::db::Database::open(&db_config) {
                 Ok(db) => db,
                 Err(e) => {
                     let _ = tx.send(TaskUpdate::Failed {

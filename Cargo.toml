@@ -5,6 +5,10 @@ edition = "2021"
 description = "A TUI photo management application"
 authors = ["Clepho Authors"]
 
+[lib]
+name = "clepho"
+path = "src/lib.rs"
+
 [[bin]]
 name = "clepho"
 path = "src/main.rs"
@@ -12,6 +16,10 @@ path = "src/main.rs"
 [[bin]]
 name = "clepho-daemon"
 path = "src/bin/daemon.rs"
+
+[features]
+default = []
+postgres = ["dep:postgres", "dep:r2d2", "dep:r2d2_postgres"]
 
 [dependencies]
 # TUI
@@ -23,6 +31,9 @@ tokio = { version = "1", features = ["full"] }
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
+postgres = { version = "0.19", optional = true }
+r2d2 = { version = "0.8", optional = true }
+r2d2_postgres = { version = "0.18", optional = true }
 
 # Image processing
 image = "0.25"

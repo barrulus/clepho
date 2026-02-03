@@ -69,17 +69,6 @@ fn calculate_perceptual_hash(path: &PathBuf) -> Result<String> {
     Ok(hash.to_base64())
 }
 
-pub fn hamming_distance(hash1: &str, hash2: &str) -> Result<u32> {
-    use img_hash::ImageHash;
-
-    let h1 = ImageHash::<Box<[u8]>>::from_base64(hash1)
-        .map_err(|e| anyhow!("Invalid hash1: {:?}", e))?;
-    let h2 = ImageHash::<Box<[u8]>>::from_base64(hash2)
-        .map_err(|e| anyhow!("Invalid hash2: {:?}", e))?;
-
-    Ok(h1.dist(&h2))
-}
-
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]

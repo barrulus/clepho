@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use super::client::LlmClient;
+use crate::config::DatabaseConfig;
 use crate::db::Database;
 use crate::tasks::{TaskUpdate, TaskProgress};
 
@@ -51,7 +52,7 @@ impl LlmQueue {
     /// Process all tasks in parallel with configurable concurrency.
     pub fn process_all_parallel(
         &mut self,
-        db_path: &PathBuf,
+        db_config: &DatabaseConfig,
         tx: mpsc::Sender<TaskUpdate>,
         cancel_flag: Arc<AtomicBool>,
         concurrency: usize,
@@ -74,7 +75,7 @@ impl LlmQueue {
             for _ in 0..concurrency {
                 let work_queue = work_queue.clone();
                 let client = self.client.clone();
-                let db_path = db_path.clone();
+                let db_config = db_config.clone();
                 let tx = tx.clone();
                 let cancel_flag = cancel_flag.clone();
                 let abort_flag = abort_flag.clone();
@@ -83,7 +84,7 @@ impl LlmQueue {
                 let consecutive_failures = consecutive_failures.clone();
 
                 scope.spawn(move || {
-                    let db = match Database::open(&db_path) {
+                    let db = match Database::open(&db_config) {
                         Ok(db) => db,
                         Err(e) => {
                             tracing::error!(error = %e, "Worker failed to open database");
@@ -243,14 +244,7 @@ fn process_task(client: &LlmClient, task: &LlmTask, db: &Database) -> Result<()>
     let (description, tags) = client.describe_and_tag_image(&task.photo_path)?;
     let tags_json = serde_json::to_string(&tags)?;
 
-    db.conn.execute(
-        r#"
-        UPDATE photos
-        SET description = ?, tags = ?, llm_processed_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        "#,
-        rusqlite::params![description, tags_json, task.photo_id],
-    )?;
+    db.save_llm_result(task.photo_id, &description, &tags_json)?;
 
     if client.supports_embeddings() {
         if let Ok(embedding) = client.get_text_embedding(&description) {
@@ -259,65 +253,4 @@ fn process_task(client: &LlmClient, task: &LlmTask, db: &Database) -> Result<()>
     }
 
     Ok(())
-}
-
-impl Database {
-    #[allow(dead_code)]
-    pub fn get_photos_without_description(&self) -> Result<Vec<LlmTask>> {
-        let mut stmt = self.conn.prepare(
-            r#"
-            SELECT id, path FROM photos
-            WHERE description IS NULL
-            ORDER BY scanned_at DESC
-            "#,
-        )?;
-
-        let tasks = stmt
-            .query_map([], |row| {
-                Ok(LlmTask {
-                    photo_id: row.get(0)?,
-                    photo_path: PathBuf::from(row.get::<_, String>(1)?),
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(tasks)
-    }
-
-    pub fn get_photos_without_description_in_dir(&self, directory: &std::path::Path) -> Result<Vec<LlmTask>> {
-        let dir_str = directory.to_string_lossy();
-        let pattern = format!("{}%", dir_str);
-
-        let mut stmt = self.conn.prepare(
-            r#"
-            SELECT id, path FROM photos
-            WHERE description IS NULL AND path LIKE ?
-            ORDER BY path ASC
-            "#,
-        )?;
-
-        let tasks = stmt
-            .query_map([pattern], |row| {
-                Ok(LlmTask {
-                    photo_id: row.get(0)?,
-                    photo_path: PathBuf::from(row.get::<_, String>(1)?),
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(tasks)
-    }
-
-    #[allow(dead_code)]
-    pub fn get_photo_description(&self, photo_id: i64) -> Result<Option<String>> {
-        let result: Option<String> = self.conn.query_row(
-            "SELECT description FROM photos WHERE id = ?",
-            [photo_id],
-            |row| row.get(0),
-        ).ok();
-
-        Ok(result)
-    }
 }

@@ -4,15 +4,18 @@
 
 | Component | Library | Version |
 |-----------|---------|---------|
-| TUI Framework | ratatui | 0.28 |
+| TUI Framework | ratatui | 0.29 |
 | Terminal Backend | crossterm | 0.28 |
 | Async Runtime | tokio | 1.x |
-| Database | rusqlite | 0.32 |
+| Database (SQLite) | rusqlite | 0.32 |
+| Database (PostgreSQL) | postgres + r2d2 | 0.19 / 0.8 |
 | HTTP Client | ureq | 2.x |
 | Image Processing | image | 0.25 |
 | EXIF Extraction | kamadak-exif | 0.5 |
 | Perceptual Hashing | img_hash | 3.2 |
+| Face Detection | ort (ONNX Runtime) | 2.0.0-rc.11 |
 | File Walking | walkdir | 2.x |
+| Parallel Processing | rayon | 1.10 |
 
 ## Key Implementation Decisions
 
@@ -60,9 +63,22 @@ The `get_llm_description()` method requires `&mut self` because it may:
 
 This required changing UI rendering to take `&mut App` and cloning the selected entry to avoid borrow conflicts.
 
-## Database Schema
+## Database Architecture
 
-See `src/db/schema.rs` for full schema. Key tables:
+The database layer uses an **enum dispatch** pattern (`src/db/mod.rs`) to support SQLite and PostgreSQL behind a unified `Database` API:
+
+```
+Database
+  └── DatabaseInner (enum)
+        ├── Sqlite(SqliteDb)     ← src/db/sqlite.rs
+        └── Postgres(PgDb)       ← src/db/postgres.rs (feature-gated)
+```
+
+A `dispatch!` macro forwards all ~98 public methods to the active backend variant. External code calls `Database` methods without knowing which backend is active.
+
+PostgreSQL support is behind the `postgres` Cargo feature flag. The `config` and `db` modules live in the library crate (`src/lib.rs`) so both binaries (TUI and daemon) share them.
+
+See `src/db/schema.rs` (SQLite) and `src/db/postgres_schema.rs` (PostgreSQL) for the full schema. Key tables:
 
 ### photos
 - Core metadata (path, size, timestamps)
@@ -77,15 +93,5 @@ See `src/db/schema.rs` for full schema. Key tables:
 
 ## Known Limitations
 
-1. **No image preview in terminal** - Only metadata shown, no actual image rendering
-2. **Single-threaded LLM** - Batch processing is sequential, not parallel
-3. **No undo for deletions** - Deleted files are permanently removed
-4. **HEIC support** - Requires system libheif for full support
-
-## Future Improvements
-
-- Parallel LLM processing for faster batch operations
-- Image preview using terminal graphics protocols (sixel, kitty)
-- Undo/trash functionality for deletions
-- Search functionality
-- Tag-based filtering
+1. **HEIC support** - Requires system libheif for full support
+2. **PostgreSQL requires feature flag** - Not included in default build
