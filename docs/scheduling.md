@@ -257,7 +257,7 @@ Then schedule tasks - they'll default to this window.
 
 ### Reliable Scheduling
 
-1. **Keep Clepho running** - Tasks only execute while running
+1. **Use the daemon** - Install `clepho-daemon` as a service so tasks run even when the TUI is closed (see [Running](running.md))
 2. **Use hours of operation** - Prevent accidental daytime execution
 3. **Check overdue on startup** - Don't miss important tasks
 
@@ -313,8 +313,8 @@ Currently, each task runs once:
 - Can't schedule same type twice simultaneously
 - Wait for completion before scheduling again
 
-### Clepho Must Run
+### TUI Must Run (unless using the daemon)
 
-- Tasks don't run if Clepho isn't open
-- Consider running Clepho in background/tmux
-- Overdue handling catches missed tasks
+- The TUI's built-in scheduler only runs while the TUI is open
+- Install `clepho-daemon` as a systemd service for reliable background execution (see [Running](running.md))
+- Overdue handling catches missed tasks on next TUI launch

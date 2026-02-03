@@ -79,6 +79,7 @@ See [config.example.toml](config.example.toml) for all options or [docs/configur
 | Topic | Description |
 |-------|-------------|
 | [Installation](docs/installation.md) | Build requirements and setup |
+| [Running](docs/running.md) | TUI and daemon setup, systemd, NixOS |
 | [Navigation](docs/navigation.md) | File browser and preview pane |
 | [Scanning](docs/scanning.md) | Photo indexing and metadata |
 | [Duplicates](docs/duplicates.md) | Finding and managing duplicates |

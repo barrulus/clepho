@@ -798,6 +798,12 @@ impl Config {
         }
     }
 
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
+    }
+
     pub fn save(&self) -> Result<()> {
         let config_path = Self::config_path();
 

@@ -6,6 +6,7 @@ Welcome to the Clepho documentation. Clepho is a terminal user interface (TUI) a
 
 ### Getting Started
 - [Installation](installation.md) - Prerequisites, building, and first run
+- [Running](running.md) - How to run the TUI and daemon together
 - [Configuration](configuration.md) - Complete configuration reference
 
 ### Core Features
