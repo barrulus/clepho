@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::prelude::*;
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -1099,23 +1100,40 @@ impl App {
                 if marked.is_empty() {
                     self.status_message = Some("No photos marked for deletion".to_string());
                 } else {
-                    let mut moved = 0;
-                    for photo in &marked {
-                        let path = std::path::PathBuf::from(&photo.path);
-                        match self.trash_manager.move_to_trash(&path) {
-                            Ok(trash_path) => {
-                                if let Err(e) = self.db.mark_trashed(photo.id, &trash_path) {
-                                    self.status_message = Some(format!("DB error: {}", e));
-                                } else {
-                                    moved += 1;
-                                }
+                    let total = marked.len();
+                    let trash_manager = &self.trash_manager;
+
+                    // Move files to trash in parallel
+                    let results: Vec<(i64, Option<PathBuf>)> = marked
+                        .par_iter()
+                        .map(|photo| {
+                            let path = PathBuf::from(&photo.path);
+                            match trash_manager.move_to_trash(&path) {
+                                Ok(trash_path) => (photo.id, Some(trash_path)),
+                                Err(_) => (photo.id, None),
                             }
-                            Err(e) => {
-                                self.status_message = Some(format!("Error moving to trash: {}", e));
+                        })
+                        .collect();
+
+                    // Update database sequentially for successful moves
+                    let mut moved = 0;
+                    for (id, trash_path) in results {
+                        if let Some(path) = trash_path {
+                            if self.db.mark_trashed(id, &path).is_ok() {
+                                moved += 1;
                             }
                         }
                     }
-                    self.status_message = Some(format!("Moved {} files to trash", moved));
+
+                    let failed = total - moved;
+                    if failed > 0 {
+                        self.status_message = Some(format!(
+                            "Moved {} files to trash ({} failed)",
+                            moved, failed
+                        ));
+                    } else {
+                        self.status_message = Some(format!("Moved {} files to trash", moved));
+                    }
 
                     // Refresh duplicates view
                     self.find_duplicates()?;
@@ -1128,16 +1146,39 @@ impl App {
                 if marked.is_empty() {
                     self.status_message = Some("No photos marked for deletion".to_string());
                 } else {
-                    let count = marked.len();
-                    // Delete actual files
-                    for photo in &marked {
-                        if let Err(e) = std::fs::remove_file(&photo.path) {
-                            self.status_message = Some(format!("Error deleting {}: {}", photo.path, e));
-                        }
+                    let total = marked.len();
+                    // Delete actual files in parallel
+                    let results: Vec<(i64, bool)> = marked
+                        .par_iter()
+                        .map(|photo| {
+                            let success = std::fs::remove_file(&photo.path).is_ok();
+                            (photo.id, success)
+                        })
+                        .collect();
+
+                    // Collect IDs of successfully deleted files
+                    let deleted_ids: Vec<i64> = results
+                        .iter()
+                        .filter(|(_, success)| *success)
+                        .map(|(id, _)| *id)
+                        .collect();
+
+                    let deleted_count = deleted_ids.len();
+                    let failed_count = total - deleted_count;
+
+                    // Only remove successfully deleted files from database
+                    if !deleted_ids.is_empty() {
+                        self.db.delete_photos_by_ids(&deleted_ids)?;
                     }
-                    // Remove from database
-                    self.db.delete_marked_photos()?;
-                    self.status_message = Some(format!("Permanently deleted {} photos", count));
+
+                    if failed_count > 0 {
+                        self.status_message = Some(format!(
+                            "Deleted {} photos ({} failed - files may not exist)",
+                            deleted_count, failed_count
+                        ));
+                    } else {
+                        self.status_message = Some(format!("Permanently deleted {} photos", deleted_count));
+                    }
 
                     // Refresh duplicates view
                     self.find_duplicates()?;

@@ -223,11 +223,27 @@ impl Database {
         Ok(photos)
     }
 
+    #[allow(dead_code)]
     pub fn delete_marked_photos(&self) -> Result<usize> {
         let count = self.conn.execute(
             "DELETE FROM photos WHERE marked_for_deletion = 1",
             [],
         )?;
+        Ok(count)
+    }
+
+    /// Delete specific photos by their IDs (used after parallel file deletion)
+    pub fn delete_photos_by_ids(&self, ids: &[i64]) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "DELETE FROM photos WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let count = self.conn.execute(&sql, params.as_slice())?;
         Ok(count)
     }
 

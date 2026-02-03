@@ -82,6 +82,7 @@ pub fn hamming_distance(hash1: &str, hash2: &str) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
