@@ -3893,7 +3893,7 @@ impl App {
 
     /// Show a confirmation dialog for an expensive action
     fn show_confirmation(&mut self, action: Action) {
-        let initial_prompt = if matches!(action, Action::Scan | Action::DescribeWithLlm | Action::BatchLlm) {
+        let initial_prompt = if matches!(action, Action::DescribeWithLlm | Action::BatchLlm) {
             let dir_str = self.current_dir.to_string_lossy().to_string();
             self.db.get_directory_prompt(&dir_str)
                 .ok()

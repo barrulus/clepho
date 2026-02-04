@@ -43,7 +43,7 @@ impl ConfirmDialog {
             Action::ClipEmbedding => "Generate CLIP embeddings? This will create semantic embeddings for images in this directory.".to_string(),
             _ => format!("Execute {:?}?", action),
         };
-        let has_prompt_field = matches!(action, Action::Scan | Action::DescribeWithLlm | Action::BatchLlm);
+        let has_prompt_field = matches!(action, Action::DescribeWithLlm | Action::BatchLlm);
         let prompt_text = initial_prompt.clone().unwrap_or_default();
         let prompt_cursor = prompt_text.len();
         let original_prompt = initial_prompt.unwrap_or_default();
