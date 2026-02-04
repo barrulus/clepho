@@ -16,6 +16,7 @@ pub mod preview;
 pub mod rename_dialog;
 pub mod schedule_dialog;
 pub mod search_dialog;
+pub mod settings_dialog;
 mod status_bar;
 mod task_list_dialog;
 pub mod trash_dialog;
@@ -186,6 +187,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.mode == AppMode::Confirming {
         if let Some(ref dialog) = app.confirm_dialog {
             confirm_dialog::render(frame, dialog, area);
+        }
+    }
+
+    // Render settings dialog if in settings mode
+    if app.mode == AppMode::Settings {
+        if let Some(ref dialog) = app.settings_dialog {
+            settings_dialog::render(frame, dialog, area);
         }
     }
 }

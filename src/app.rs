@@ -67,6 +67,7 @@ pub enum AppMode {
     SlideshowHelp,
     Centralising,
     Confirming,
+    Settings,
 }
 
 #[allow(dead_code)]
@@ -136,6 +137,8 @@ pub struct App {
     pub centralise_dialog: Option<CentraliseDialog>,
     // Confirm dialog for expensive tasks
     pub confirm_dialog: Option<ConfirmDialog>,
+    // Settings dialog
+    pub settings_dialog: Option<crate::ui::settings_dialog::SettingsDialog>,
     // Action map for configurable keybindings
     pub action_map: HashMap<(KeyCode, KeyModifiers), Action>,
     // View filters
@@ -208,6 +211,7 @@ impl App {
             slideshow_view: None,
             centralise_dialog: None,
             confirm_dialog: None,
+            settings_dialog: None,
             action_map,
             show_hidden,
             show_all_files,
@@ -372,7 +376,15 @@ impl App {
 
             terminal.draw(|frame| ui::render(frame, self))?;
 
-            if event::poll(Duration::from_millis(100))? {
+            // Use shorter poll timeout when tasks are running for responsive progress updates,
+            // longer timeout when idle to reduce CPU usage
+            let poll_timeout = if self.task_manager.has_running_tasks() {
+                Duration::from_millis(16) // ~60 FPS when tasks running
+            } else {
+                Duration::from_millis(50) // ~20 FPS when idle (still responsive)
+            };
+
+            if event::poll(poll_timeout)? {
                 match event::read()? {
                     Event::Key(key) => self.handle_key(key)?,
                     Event::Mouse(mouse) => {
@@ -475,6 +487,11 @@ impl App {
         // Handle EditingDescription mode
         if self.mode == AppMode::EditingDescription {
             return self.handle_edit_description_key(key);
+        }
+
+        // Handle Settings mode
+        if self.mode == AppMode::Settings {
+            return self.handle_settings_key(key);
         }
 
         // Handle Gallery Help mode
@@ -607,6 +624,12 @@ impl App {
                 self.exit_visual_mode();
                 self.clear_selection();
             }
+            return Ok(());
+        }
+
+        // Special case: '$' opens settings dialog
+        if key.code == KeyCode::Char('$') {
+            self.open_settings_dialog();
             return Ok(());
         }
 
@@ -4083,6 +4106,111 @@ impl App {
         };
         self.confirm_dialog = Some(ConfirmDialog::new(action, initial_prompt));
         self.mode = AppMode::Confirming;
+    }
+
+    // --- Settings dialog methods ---
+
+    fn open_settings_dialog(&mut self) {
+        self.settings_dialog = Some(crate::ui::settings_dialog::SettingsDialog::new(&self.config));
+        self.mode = AppMode::Settings;
+    }
+
+    fn handle_settings_key(&mut self, key: KeyEvent) -> Result<()> {
+        use crate::ui::settings_dialog::EditingField;
+
+        let dialog = match self.settings_dialog.as_mut() {
+            Some(d) => d,
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        // Handle text editing mode
+        if dialog.editing != EditingField::None {
+            match key.code {
+                KeyCode::Esc => {
+                    dialog.cancel_edit();
+                }
+                KeyCode::Enter => {
+                    dialog.apply_edit();
+                }
+                KeyCode::Backspace => dialog.backspace(),
+                KeyCode::Delete => dialog.delete(),
+                KeyCode::Left => dialog.move_cursor_left(),
+                KeyCode::Right => dialog.move_cursor_right(),
+                KeyCode::Home => dialog.move_cursor_home(),
+                KeyCode::End => dialog.move_cursor_end(),
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    dialog.clear_field();
+                }
+                KeyCode::Char(c) => dialog.handle_char(c),
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        // Normal navigation mode
+        match key.code {
+            KeyCode::Esc => {
+                self.settings_dialog = None;
+                self.mode = AppMode::Normal;
+            }
+            KeyCode::Tab => {
+                dialog.next_section();
+            }
+            KeyCode::BackTab => {
+                dialog.prev_section();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                dialog.select_next();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                dialog.select_prev();
+            }
+            KeyCode::Enter => {
+                dialog.start_edit();
+            }
+            KeyCode::Char(' ') => {
+                // For provider field, cycle through options
+                if dialog.get_current_field_public() == EditingField::Provider {
+                    dialog.cycle_provider();
+                }
+            }
+            // Save config (Ctrl+S)
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                dialog.apply_to_config(&mut self.config);
+                match self.config.save() {
+                    Ok(_) => {
+                        // Rebuild LLM client with new settings
+                        self.llm_client = LlmClient::from_config(&self.config.llm);
+                        self.status_message = Some("Settings saved to config file".to_string());
+                        dialog.modified = false;
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Error saving config: {}", e));
+                    }
+                }
+            }
+            // Reload config (Ctrl+R)
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match Config::load() {
+                    Ok(new_config) => {
+                        self.config = new_config;
+                        self.llm_client = LlmClient::from_config(&self.config.llm);
+                        // Recreate settings dialog with fresh config
+                        self.settings_dialog = Some(crate::ui::settings_dialog::SettingsDialog::new(&self.config));
+                        self.status_message = Some("Config reloaded from file".to_string());
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Error reloading config: {}", e));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 
