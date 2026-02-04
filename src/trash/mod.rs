@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::config::TrashConfig;
+use crate::config::{TrashConfig, DuplicateTrashConfig};
 
 pub struct TrashManager {
     config: TrashConfig,
@@ -31,6 +31,17 @@ pub struct CleanupResult {
 impl TrashManager {
     pub fn new(config: TrashConfig) -> Self {
         Self { config }
+    }
+
+    /// Create a TrashManager from a DuplicateTrashConfig
+    pub fn new_from_duplicate_config(dup_config: DuplicateTrashConfig) -> Self {
+        Self {
+            config: TrashConfig {
+                path: dup_config.path,
+                max_age_days: dup_config.max_age_days,
+                max_size_bytes: dup_config.max_size_bytes,
+            },
+        }
     }
 
     /// Ensure the trash directory exists
@@ -165,5 +176,72 @@ impl TrashManager {
     /// Get max size in bytes
     pub fn max_size_bytes(&self) -> u64 {
         self.config.max_size_bytes
+    }
+
+    /// Automatically empty trash by removing files that exceed age or size limits.
+    /// Returns a CleanupResult with the number of files deleted and bytes freed.
+    pub fn auto_empty(&self) -> Result<CleanupResult> {
+        if !self.config.path.exists() {
+            return Ok(CleanupResult::default());
+        }
+
+        let mut result = CleanupResult::default();
+        let now = Utc::now();
+        let max_age = chrono::Duration::days(self.config.max_age_days as i64);
+
+        // Collect all files with their metadata
+        let mut entries: Vec<(PathBuf, u64, DateTime<Utc>)> = Vec::new();
+        let mut total_size: u64 = 0;
+
+        for entry in fs::read_dir(&self.config.path)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+
+            let path = entry.path();
+            let metadata = entry.metadata()?;
+            let size = metadata.len();
+            let modified = metadata.modified()
+                .ok()
+                .and_then(|t| DateTime::<Utc>::from(t).into());
+
+            // Use modified time, fallback to now if unavailable
+            let file_time = modified.unwrap_or(now);
+            entries.push((path, size, file_time));
+            total_size += size;
+        }
+
+        // Sort by age (oldest first) for size-based cleanup
+        entries.sort_by(|a, b| a.2.cmp(&b.2));
+
+        // First pass: remove files older than max_age_days
+        let mut remaining_entries = Vec::new();
+        for (path, size, file_time) in entries {
+            let age = now.signed_duration_since(file_time);
+            if age > max_age {
+                if fs::remove_file(&path).is_ok() {
+                    result.files_deleted += 1;
+                    result.bytes_freed += size;
+                    total_size -= size;
+                } else {
+                    remaining_entries.push((path, size, file_time));
+                }
+            } else {
+                remaining_entries.push((path, size, file_time));
+            }
+        }
+
+        // Second pass: if still over size limit, remove oldest files first
+        while total_size > self.config.max_size_bytes && !remaining_entries.is_empty() {
+            let (path, size, _) = remaining_entries.remove(0);
+            if fs::remove_file(&path).is_ok() {
+                result.files_deleted += 1;
+                result.bytes_freed += size;
+                total_size -= size;
+            }
+        }
+
+        Ok(result)
     }
 }

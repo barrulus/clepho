@@ -113,6 +113,8 @@ pub struct App {
     // Trash manager and dialog
     pub trash_manager: TrashManager,
     pub trash_dialog: Option<TrashDialog>,
+    // Separate trash for duplicates
+    pub duplicate_trash_manager: TrashManager,
     // Change detection
     pub detected_changes: Option<ChangeDetectionResult>,
     pub changes_dialog: Option<ChangesDialog>,
@@ -158,6 +160,7 @@ impl App {
         let llm_client = LlmClient::new(&config.llm.endpoint, &config.llm.model);
         let image_preview = ImagePreviewState::new(config.preview.protocol, &config.thumbnails);
         let trash_manager = TrashManager::new(config.trash.clone());
+        let duplicate_trash_manager = TrashManager::new_from_duplicate_config(config.duplicate_trash.clone());
         let action_map = config.keybindings.build_action_map();
         // Extract view settings before moving config
         let show_hidden = config.view.show_hidden;
@@ -192,6 +195,7 @@ impl App {
             task_manager: BackgroundTaskManager::new(),
             trash_manager,
             trash_dialog: None,
+            duplicate_trash_manager,
             detected_changes: None,
             changes_dialog: None,
             schedule_manager: ScheduleManager::new(),
@@ -969,6 +973,22 @@ impl App {
         None
     }
 
+    /// Get photo rotation from database (cached via ImagePreviewState)
+    pub fn get_photo_rotation(&mut self, path: &std::path::PathBuf) -> i32 {
+        // Check if already cached in the preview state
+        if let Some(cached) = self.image_preview.get_cached_rotation(path) {
+            return cached;
+        }
+
+        // Fetch from database
+        let rotation = self.db.get_photo_rotation(path).unwrap_or(0);
+
+        // Cache for future lookups
+        self.image_preview.cache_rotation(path.clone(), rotation);
+
+        rotation
+    }
+
     /// Get full photo metadata from database (cached via ImagePreviewState)
     pub fn get_photo_metadata(&mut self, path: &std::path::PathBuf) -> Option<crate::db::PhotoMetadata> {
         // Check if already cached in the preview state
@@ -1168,6 +1188,38 @@ impl App {
                 }
             }
 
+            // Auto-mark identical duplicates only (exact SHA256 matches)
+            KeyCode::Char('A') => {
+                if let Some(ref mut view) = self.duplicates_view {
+                    let count = view.auto_mark_identical();
+                    // Sync marks to database
+                    for group in &view.groups {
+                        for photo in &group.photos {
+                            if photo.marked_for_deletion {
+                                self.db.mark_for_deletion(photo.id)?;
+                            } else {
+                                self.db.unmark_for_deletion(photo.id)?;
+                            }
+                        }
+                    }
+                    if count > 0 {
+                        self.status_message = Some(format!("Auto-marked {} identical duplicates", count));
+                    } else {
+                        self.status_message = Some("No identical duplicates to mark".to_string());
+                    }
+                }
+            }
+
+            // Open current photo in external viewer
+            KeyCode::Char('o') => {
+                if let Some(ref view) = self.duplicates_view {
+                    if let Some(photo) = view.current_photo() {
+                        let path = PathBuf::from(&photo.path);
+                        self.open_external_path(&path)?;
+                    }
+                }
+            }
+
             // Move marked to trash (safe deletion)
             KeyCode::Char('x') => {
                 let marked = self.db.get_marked_not_trashed()?;
@@ -1175,7 +1227,8 @@ impl App {
                     self.status_message = Some("No photos marked for deletion".to_string());
                 } else {
                     let total = marked.len();
-                    let trash_manager = &self.trash_manager;
+                    // Use duplicate-specific trash for duplicates view
+                    let trash_manager = &self.duplicate_trash_manager;
 
                     // Move files to trash in parallel
                     let results: Vec<(i64, Option<PathBuf>)> = marked
@@ -1185,7 +1238,7 @@ impl App {
                             match trash_manager.move_to_trash(&path) {
                                 Ok(trash_path) => (photo.id, Some(trash_path)),
                                 Err(e) => {
-                                    tracing::error!(path = %photo.path, error = %e, "Failed to move file to trash");
+                                    tracing::error!(path = %photo.path, error = %e, "Failed to move file to duplicate trash");
                                     (photo.id, None)
                                 }
                             }
@@ -1206,11 +1259,24 @@ impl App {
                     let failed = total - moved;
                     if failed > 0 {
                         self.status_message = Some(format!(
-                            "Moved {} files to trash ({} failed)",
+                            "Moved {} files to duplicate trash ({} failed)",
                             moved, failed
                         ));
                     } else {
-                        self.status_message = Some(format!("Moved {} files to trash", moved));
+                        self.status_message = Some(format!("Moved {} files to duplicate trash", moved));
+                    }
+
+                    // Auto-empty duplicate trash if configured
+                    if self.config.duplicate_trash.auto_empty {
+                        if let Ok(cleanup) = self.duplicate_trash_manager.auto_empty() {
+                            if cleanup.files_deleted > 0 {
+                                tracing::info!(
+                                    "Auto-emptied duplicate trash: {} files, {} bytes freed",
+                                    cleanup.files_deleted,
+                                    cleanup.bytes_freed
+                                );
+                            }
+                        }
                     }
 
                     // Remove trashed photos from the in-memory view
@@ -1286,50 +1352,163 @@ impl App {
     fn handle_duplicates_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Result<()> {
         use crossterm::event::{MouseEventKind, MouseButton};
 
-        // Only handle left clicks
-        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return Ok(());
-        }
-
-        let view = match self.duplicates_view.as_mut() {
-            Some(v) => v,
-            None => return Ok(()),
-        };
-
-        // Calculate layout (matching render logic in duplicates.rs)
-        // Left 40% for groups, right 60% for photos
-        let left_width = (area.width * 40) / 100;
-        let right_start = left_width;
-
         let mouse_x = mouse.column;
         let mouse_y = mouse.row;
 
-        // Check if click is in the groups panel (left side)
-        if mouse_x < left_width {
-            // Account for border (1 pixel) and title (1 line)
-            let content_start_y = 2;
-            if mouse_y >= content_start_y {
-                let clicked_index = (mouse_y - content_start_y) as usize + view.group_scroll;
-                if clicked_index < view.groups.len() {
-                    view.current_group = clicked_index;
-                    view.selected_photo = 0;
-                }
-            }
-        }
-        // Check if click is in the photos panel (right side)
-        else if mouse_x >= right_start {
-            // Account for border (1 pixel) and title (1 line)
-            let content_start_y = 2;
-            if mouse_y >= content_start_y {
-                if let Some(group) = view.current_group() {
-                    let clicked_index = (mouse_y - content_start_y) as usize;
-                    if clicked_index < group.photos.len() {
-                        view.selected_photo = clicked_index;
+        // Check if image preview is available to determine layout
+        let has_preview = self.config.preview.image_preview && self.image_preview.is_available();
+
+        // Calculate layout to match render logic in duplicates.rs
+        let (groups_width, photos_start, photos_end) = if has_preview {
+            // Three-column layout: 25% groups | 40% photos | 35% preview
+            let groups_w = (area.width * 25) / 100;
+            let photos_w = (area.width * 40) / 100;
+            (groups_w, groups_w, groups_w + photos_w)
+        } else {
+            // Two-column layout: 40% groups | 60% photos
+            let groups_w = (area.width * 40) / 100;
+            (groups_w, groups_w, area.width)
+        };
+
+        // Determine which pane the mouse is in
+        let in_groups_pane = mouse_x < groups_width;
+        let in_photos_pane = mouse_x >= photos_start && mouse_x < photos_end;
+
+        match mouse.kind {
+            // Left click - select item
+            MouseEventKind::Down(MouseButton::Left) => {
+                let view = match self.duplicates_view.as_mut() {
+                    Some(v) => v,
+                    None => return Ok(()),
+                };
+
+                if in_groups_pane {
+                    // Account for border (1 pixel) and title (1 line)
+                    let content_start_y = 2;
+                    if mouse_y >= content_start_y {
+                        let clicked_index = (mouse_y - content_start_y) as usize + view.group_scroll;
+                        if clicked_index < view.groups.len() {
+                            view.current_group = clicked_index;
+                            view.selected_photo = 0;
+                            view.photo_scroll = 0;
+                        }
+                    }
+                } else if in_photos_pane {
+                    // Account for border (1 pixel) and title (1 line)
+                    let content_start_y = 2;
+                    if mouse_y >= content_start_y {
+                        if let Some(group) = view.current_group() {
+                            let clicked_index = (mouse_y - content_start_y) as usize + view.photo_scroll;
+                            if clicked_index < group.photos.len() {
+                                view.selected_photo = clicked_index;
+                            }
+                        }
                     }
                 }
             }
+
+            // Right click - open in external viewer
+            MouseEventKind::Down(MouseButton::Right) => {
+                if in_photos_pane {
+                    if let Some(view) = self.duplicates_view.as_ref() {
+                        if let Some(photo) = view.current_photo() {
+                            let path = PathBuf::from(&photo.path);
+                            self.open_external_path(&path)?;
+                        }
+                    }
+                }
+            }
+
+            // Scroll up
+            MouseEventKind::ScrollUp => {
+                let view = match self.duplicates_view.as_mut() {
+                    Some(v) => v,
+                    None => return Ok(()),
+                };
+
+                if in_groups_pane {
+                    // Scroll groups list up
+                    view.group_scroll = view.group_scroll.saturating_sub(3);
+                    // Keep selection visible
+                    if view.current_group < view.group_scroll {
+                        view.current_group = view.group_scroll;
+                        view.selected_photo = 0;
+                        view.photo_scroll = 0;
+                    }
+                } else if in_photos_pane {
+                    // Scroll photos list up
+                    view.photo_scroll = view.photo_scroll.saturating_sub(3);
+                    // Keep selection visible
+                    if view.selected_photo < view.photo_scroll {
+                        view.selected_photo = view.photo_scroll;
+                    }
+                }
+            }
+
+            // Scroll down
+            MouseEventKind::ScrollDown => {
+                let view = match self.duplicates_view.as_mut() {
+                    Some(v) => v,
+                    None => return Ok(()),
+                };
+
+                if in_groups_pane {
+                    // Calculate visible height (subtract 2 for borders)
+                    let visible_height = area.height.saturating_sub(2) as usize;
+                    let max_scroll = view.groups.len().saturating_sub(visible_height);
+                    view.group_scroll = (view.group_scroll + 3).min(max_scroll);
+                    // Keep selection visible
+                    if view.current_group >= view.group_scroll + visible_height {
+                        view.current_group = (view.group_scroll + visible_height).saturating_sub(1).min(view.groups.len().saturating_sub(1));
+                        view.selected_photo = 0;
+                        view.photo_scroll = 0;
+                    }
+                } else if in_photos_pane {
+                    if let Some(group) = view.current_group() {
+                        let photo_count = group.photos.len();
+                        // Calculate visible height for photos (subtract 4: 2 for border/title, 2 for path area)
+                        let visible_height = area.height.saturating_sub(4) as usize;
+                        let max_scroll = photo_count.saturating_sub(visible_height);
+                        view.photo_scroll = (view.photo_scroll + 3).min(max_scroll);
+                        // Keep selection visible
+                        if view.selected_photo >= view.photo_scroll + visible_height {
+                            view.selected_photo = (view.photo_scroll + visible_height).saturating_sub(1).min(photo_count.saturating_sub(1));
+                        }
+                    }
+                }
+            }
+
+            _ => {}
         }
 
+        Ok(())
+    }
+
+    /// Open a specific path in external viewer
+    fn open_external_path(&mut self, path: &PathBuf) -> Result<()> {
+        let filename = path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg(path)
+                .spawn()?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &path.to_string_lossy()])
+                .spawn()?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(path)
+                .spawn()?;
+        }
+        self.status_message = Some(format!("Opened: {}", filename));
         Ok(())
     }
 

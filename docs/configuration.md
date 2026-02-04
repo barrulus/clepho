@@ -32,6 +32,13 @@ model = "gemma-3-4b"
 # API key (required for openai/anthropic)
 # api_key = "sk-..."
 
+# Custom prompt context prepended to image descriptions
+# custom_prompt = "These are photos from a 1985 family reunion in Texas."
+
+# Override the base LLM prompt entirely (replaces the built-in prompt)
+# Must include TAGS: format instruction for tag parsing to work
+# base_prompt = "Describe this image concisely in 2-3 sentences. Then write TAGS: followed by comma-separated tags."
+
 # Embedding model for semantic search (optional)
 # embedding_model = "text-embedding-ada-002"
 
@@ -77,6 +84,19 @@ max_age_days = 30
 
 # Maximum trash size in bytes (oldest files deleted first)
 max_size_bytes = 1073741824  # 1GB
+
+[duplicate_trash]
+# Separate trash for duplicates (keeps them isolated from regular deletions)
+path = "~/.local/share/clepho/.duplicate-trash"
+
+# Auto-delete files older than this (days)
+max_age_days = 30
+
+# Maximum trash size in bytes
+max_size_bytes = 1073741824  # 1GB
+
+# Automatically clean trash when limits exceeded
+auto_empty = false
 
 [schedule]
 # Show overdue tasks dialog on startup
@@ -140,6 +160,15 @@ See [database.md](database.md) for more details
 | `ollama` | `http://127.0.0.1:11434` | No | Local, free |
 | `openai` | `https://api.openai.com/v1` | Yes | Cloud, paid |
 | `anthropic` | `https://api.anthropic.com` | Yes | Cloud, paid |
+
+#### Prompt Customization
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `custom_prompt` | (none) | Context prepended to the base prompt (e.g. `"These are wedding photos"`) |
+| `base_prompt` | (built-in) | Replaces the entire base prompt. Must include `TAGS:` format instruction |
+
+See [AI Features](ai-features.md#customizing-the-prompt) for detailed examples.
 
 #### Model Selection
 
@@ -222,6 +251,22 @@ path = "~/.local/share/clepho/.trash"
 max_age_days = 30           # Keep for 30 days
 max_size_bytes = 5368709120  # 5GB limit
 ```
+
+### Duplicate Trash Configuration (`[duplicate_trash]`)
+
+Duplicates have a separate trash to keep them isolated from regular file deletions:
+
+```toml
+[duplicate_trash]
+path = "~/.local/share/clepho/.duplicate-trash"
+max_age_days = 30           # Keep for 30 days
+max_size_bytes = 1073741824  # 1GB limit
+
+# Automatically purge files exceeding limits after each trash operation
+auto_empty = false
+```
+
+When `auto_empty` is enabled, the duplicate trash is automatically cleaned after moving files to it, removing files that exceed the age or size limits.
 
 ### Schedule Configuration (`[schedule]`)
 

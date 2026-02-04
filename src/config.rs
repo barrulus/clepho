@@ -22,6 +22,9 @@ pub struct Config {
     pub trash: TrashConfig,
 
     #[serde(default)]
+    pub duplicate_trash: DuplicateTrashConfig,
+
+    #[serde(default)]
     pub thumbnails: ThumbnailConfig,
 
     #[serde(default)]
@@ -531,6 +534,40 @@ impl Default for TrashConfig {
     }
 }
 
+/// Configuration for duplicate-specific trash
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DuplicateTrashConfig {
+    #[serde(default = "default_duplicate_trash_path")]
+    pub path: PathBuf,
+
+    #[serde(default = "default_max_age_days")]
+    pub max_age_days: u32,
+
+    #[serde(default = "default_max_size_bytes")]
+    pub max_size_bytes: u64,
+
+    /// Whether to automatically empty trash when limits are exceeded
+    #[serde(default)]
+    pub auto_empty: bool,
+}
+
+fn default_duplicate_trash_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
+        .join("clepho/.duplicate-trash")
+}
+
+impl Default for DuplicateTrashConfig {
+    fn default() -> Self {
+        Self {
+            path: default_duplicate_trash_path(),
+            max_age_days: default_max_age_days(),
+            max_size_bytes: default_max_size_bytes(),
+            auto_empty: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThumbnailConfig {
     #[serde(default = "default_thumb_cache_path")]
@@ -659,6 +696,12 @@ pub struct LlmConfig {
     #[serde(default)]
     pub custom_prompt: Option<String>,
 
+    /// Override the base LLM prompt entirely.
+    /// When set, this replaces the built-in image description prompt.
+    /// The custom_prompt context is still prepended if also set.
+    #[serde(default)]
+    pub base_prompt: Option<String>,
+
     /// Number of concurrent LLM requests for batch processing (default: 4)
     #[serde(default = "default_batch_concurrency")]
     pub batch_concurrency: usize,
@@ -778,6 +821,7 @@ impl Default for Config {
             scanner: ScannerConfig::default(),
             preview: PreviewConfig::default(),
             trash: TrashConfig::default(),
+            duplicate_trash: DuplicateTrashConfig::default(),
             thumbnails: ThumbnailConfig::default(),
             schedule: ScheduleConfig::default(),
             library: LibraryConfig::default(),
