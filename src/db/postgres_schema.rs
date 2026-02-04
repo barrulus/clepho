@@ -223,4 +223,11 @@ CREATE TABLE IF NOT EXISTS album_photos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_album_photos_album ON album_photos(album_id);
+
+-- Per-directory custom prompts for LLM descriptions
+CREATE TABLE IF NOT EXISTS directory_prompts (
+    directory TEXT PRIMARY KEY,
+    custom_prompt TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT NOW()
+);
 "#;

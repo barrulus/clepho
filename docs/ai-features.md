@@ -158,9 +158,9 @@ green background."
 
 ## Customizing the Prompt
 
-You can customize the LLM prompt to get shorter or more focused descriptions.
+There are two ways to customize the LLM prompt: `custom_prompt` adds context to the default prompt, and `base_prompt` replaces the default prompt entirely.
 
-### Configuration
+### `custom_prompt` — Add Context
 
 Add `custom_prompt` to your `[llm]` section in `config.toml`:
 
@@ -171,12 +171,10 @@ endpoint = "http://127.0.0.1:1234/v1"
 model = "llava-1.5-7b"
 
 # Custom context prepended to the default prompt
-custom_prompt = "Keep responses brief, under 50 words. Focus only on the main subject."
+custom_prompt = "These are photos from a wedding in June 2024."
 ```
 
-### How It Works
-
-Your custom prompt is prepended as context to the default prompt:
+Your custom prompt is prepended as context to the base prompt:
 
 ```
 Context: [your custom_prompt here]
@@ -186,19 +184,59 @@ Describe this image in detail. Include information about:
 2) Notable objects, people, or elements
 3) Colors, lighting, and mood
 4) Any text visible in the image
-5) Suggested tags for organizing this photo.
 Keep the description concise but informative.
+
+After the description, on a new line write TAGS: followed by a comma-separated
+list of relevant tags for organizing this photo.
 ```
 
-### Example Custom Prompts
+#### Example Custom Prompts
 
 | Goal | Custom Prompt |
 |------|---------------|
 | Shorter descriptions | `"Keep responses under 50 words."` |
-| Tags only | `"Only provide comma-separated tags, no prose."` |
 | People focus | `"Focus on describing people: their appearance, expressions, and actions."` |
 | Technical details | `"Focus on camera settings, composition, and photographic technique."` |
 | Specific context | `"These are photos from a wedding in June 2024."` |
+
+### `base_prompt` — Replace the Default Prompt
+
+If you need full control over what the LLM is asked to do, set `base_prompt` to replace the built-in prompt entirely:
+
+```toml
+[llm]
+base_prompt = """
+Describe this image concisely in 2-3 sentences. No introductions or preambles.
+If people are present, focus on them: who they appear to be, what they're doing, expressions.
+If no people, describe the location and notable objects.
+
+After the description, on a new line write TAGS: followed by comma-separated tags.
+"""
+```
+
+**Important:** Your base prompt must include instructions for the `TAGS:` line, since tag parsing depends on that format. If you omit it, tags will not be extracted.
+
+When both `custom_prompt` and `base_prompt` are set, `custom_prompt` is still prepended as context to your custom base prompt.
+
+### Per-Folder Prompts
+
+Instead of a single global prompt, you can set a different custom prompt for each directory. When you trigger a **Scan** (`s`), **Describe with LLM** (`i`), or **Batch LLM** (`I`) action, the confirmation dialog includes an editable text field showing the current directory's prompt.
+
+- **Edit the prompt** before confirming to tailor descriptions for that folder
+- **Leave it blank** to fall back to the global `custom_prompt` from your config
+- Per-folder prompts are **stored in the database** (in the `directory_prompts` table) and persist across sessions
+- The **daemon** also uses per-folder prompts when processing scheduled LLM batch tasks
+- Press **Tab** in the confirmation dialog to switch focus between the prompt field and the confirm buttons
+
+This is useful when different directories contain different types of photos (e.g., wedding photos vs. nature photography) and benefit from different context.
+
+#### Example Base Prompts
+
+| Goal | Base Prompt |
+|------|-------------|
+| Minimal tagging | `"List comma-separated tags for this image. Write TAGS: followed by the tags."` |
+| People-focused | `"Describe who is in this photo, what they look like, and what they are doing. Then write TAGS: followed by relevant tags."` |
+| Location-focused | `"Describe where this photo was taken, including any landmarks or notable features. Then write TAGS: followed by relevant tags."` |
 
 ## Semantic Search
 

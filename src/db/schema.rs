@@ -245,6 +245,13 @@ CREATE TABLE IF NOT EXISTS album_photos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_album_photos_album ON album_photos(album_id);
+
+-- Per-directory custom prompts for LLM descriptions
+CREATE TABLE IF NOT EXISTS directory_prompts (
+    directory TEXT PRIMARY KEY,
+    custom_prompt TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 "#;
 
 /// Migration statements for existing databases.
@@ -254,4 +261,6 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE photos ADD COLUMN exif_orientation INTEGER DEFAULT 1",
     // Add user_rotation column (v0.2.0)
     "ALTER TABLE photos ADD COLUMN user_rotation INTEGER DEFAULT 0",
+    // Add directory_prompts table (v0.3.0)
+    "CREATE TABLE IF NOT EXISTS directory_prompts (directory TEXT PRIMARY KEY, custom_prompt TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
 ];

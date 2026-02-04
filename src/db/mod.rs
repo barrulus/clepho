@@ -724,4 +724,16 @@ impl Database {
     pub fn count_photos_without_faces_in_dir(&self, directory: &str) -> Result<i64> {
         dispatch!(self, count_photos_without_faces_in_dir(directory))
     }
+
+    // ========================================================================
+    // Directory prompt operations
+    // ========================================================================
+
+    pub fn get_directory_prompt(&self, directory: &str) -> Result<Option<String>> {
+        dispatch!(self, get_directory_prompt(directory))
+    }
+
+    pub fn set_directory_prompt(&self, directory: &str, prompt: &str) -> Result<()> {
+        dispatch!(self, set_directory_prompt(directory, prompt))
+    }
 }

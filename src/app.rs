@@ -1333,7 +1333,7 @@ impl App {
         Ok(())
     }
 
-    fn describe_with_llm(&mut self) -> Result<()> {
+    fn describe_with_llm(&mut self, custom_prompt: Option<String>) -> Result<()> {
         // Check if we have a selected file that's an image
         let entry = match self.selected_entry() {
             Some(e) if !e.is_dir && is_image(&e.name) => e.clone(),
@@ -1351,8 +1351,10 @@ impl App {
 
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmSingle);
         let path = entry.path.clone();
-        let endpoint = self.config.llm.endpoint.clone();
-        let model = self.config.llm.model.clone();
+        let mut llm_config = self.config.llm.clone();
+        if let Some(prompt) = custom_prompt {
+            llm_config.custom_prompt = Some(prompt);
+        }
         let db_config = self.config.database.clone();
 
         // Spawn LLM request in background thread
@@ -1363,7 +1365,7 @@ impl App {
                 return;
             }
 
-            let client = LlmClient::new(&endpoint, &model);
+            let client = LlmClient::from_config(&llm_config);
             let _ = tx.send(TaskUpdate::Started { total: 1 });
 
             match client.describe_image(&path) {
@@ -1389,7 +1391,7 @@ impl App {
         Ok(())
     }
 
-    fn start_batch_llm(&mut self) -> Result<()> {
+    fn start_batch_llm(&mut self, custom_prompt: Option<String>) -> Result<()> {
         // Don't start if already processing
         if self.task_manager.is_running(TaskType::LlmBatch) {
             self.status_message = Some("Batch LLM already running".to_string());
@@ -1410,13 +1412,15 @@ impl App {
         let total = tasks.len();
         let concurrency = self.config.llm.batch_concurrency;
         let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmBatch);
-        let endpoint = self.config.llm.endpoint.clone();
-        let model = self.config.llm.model.clone();
+        let mut llm_config = self.config.llm.clone();
+        if let Some(prompt) = custom_prompt {
+            llm_config.custom_prompt = Some(prompt);
+        }
         let db_config = self.config.database.clone();
 
         // Spawn batch processing in background thread
         std::thread::spawn(move || {
-            let client = LlmClient::new(&endpoint, &model);
+            let client = LlmClient::from_config(&llm_config);
             let mut queue = crate::llm::LlmQueue::new(client);
             queue.add_tasks(tasks);
             queue.process_all_parallel(&db_config, tx, cancel_flag, concurrency);
@@ -2877,7 +2881,7 @@ impl App {
                         self.start_scan()?;
                     }
                     ScheduledTaskType::LlmBatch => {
-                        self.start_batch_llm()?;
+                        self.start_batch_llm(None)?;
                     }
                     ScheduledTaskType::FaceDetection => {
                         self.start_face_scan()?;
@@ -2976,7 +2980,7 @@ impl App {
                 }
                 ScheduledTaskType::LlmBatch => {
                     self.status_message = Some(format!("Starting scheduled LLM batch..."));
-                    let _ = self.start_batch_llm();
+                    let _ = self.start_batch_llm(None);
                 }
                 ScheduledTaskType::FaceDetection => {
                     self.status_message = Some(format!("Starting scheduled face detection..."));
@@ -3765,34 +3769,120 @@ impl App {
     }
 
     fn handle_confirm_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                // User confirmed - execute the pending action
-                if let Some(dialog) = self.confirm_dialog.take() {
-                    self.mode = AppMode::Normal;
-                    // Force redraw of any images behind the modal
-                    self.image_preview.invalidate_cache();
-                    self.execute_confirmed_action(dialog.action)?;
+        use crate::ui::confirm_dialog::ConfirmFocus;
+
+        let is_prompt_focused = self.confirm_dialog.as_ref()
+            .map(|d| d.has_prompt_field && d.focus == ConfirmFocus::PromptField)
+            .unwrap_or(false);
+
+        if is_prompt_focused {
+            // Text editing keys when prompt field is focused
+            match key.code {
+                KeyCode::Tab => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.toggle_focus();
+                    }
                 }
+                KeyCode::Esc => {
+                    self.confirm_dialog = None;
+                    self.mode = AppMode::Normal;
+                    self.image_preview.invalidate_cache();
+                }
+                KeyCode::Enter => {
+                    // Confirm from prompt field
+                    if let Some(dialog) = self.confirm_dialog.take() {
+                        self.mode = AppMode::Normal;
+                        self.image_preview.invalidate_cache();
+                        // Save prompt if modified
+                        if dialog.prompt_modified() {
+                            let dir_str = self.current_dir.to_string_lossy().to_string();
+                            let _ = self.db.set_directory_prompt(&dir_str, &dialog.prompt_text);
+                        }
+                        let custom_prompt = if dialog.prompt_text.is_empty() { None } else { Some(dialog.prompt_text.clone()) };
+                        self.execute_confirmed_action_with_prompt(dialog.action, custom_prompt)?;
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.backspace();
+                    }
+                }
+                KeyCode::Delete => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.delete();
+                    }
+                }
+                KeyCode::Left => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.move_cursor_left();
+                    }
+                }
+                KeyCode::Right => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.move_cursor_right();
+                    }
+                }
+                KeyCode::Home => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.move_cursor_home();
+                    }
+                }
+                KeyCode::End => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.move_cursor_end();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.handle_char(c);
+                    }
+                }
+                _ => {}
             }
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                // User cancelled
-                self.confirm_dialog = None;
-                self.mode = AppMode::Normal;
-                // Force redraw of any images behind the modal
-                self.image_preview.invalidate_cache();
+        } else {
+            // Button-focused or no prompt field
+            match key.code {
+                KeyCode::Tab => {
+                    if let Some(dialog) = self.confirm_dialog.as_mut() {
+                        dialog.toggle_focus();
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    // User confirmed - execute the pending action
+                    if let Some(dialog) = self.confirm_dialog.take() {
+                        self.mode = AppMode::Normal;
+                        self.image_preview.invalidate_cache();
+                        // Save prompt if modified
+                        if dialog.has_prompt_field && dialog.prompt_modified() {
+                            let dir_str = self.current_dir.to_string_lossy().to_string();
+                            let _ = self.db.set_directory_prompt(&dir_str, &dialog.prompt_text);
+                        }
+                        let custom_prompt = if dialog.has_prompt_field {
+                            if dialog.prompt_text.is_empty() { None } else { Some(dialog.prompt_text.clone()) }
+                        } else {
+                            None
+                        };
+                        self.execute_confirmed_action_with_prompt(dialog.action, custom_prompt)?;
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    // User cancelled
+                    self.confirm_dialog = None;
+                    self.mode = AppMode::Normal;
+                    self.image_preview.invalidate_cache();
+                }
+                _ => {}
             }
-            _ => {}
         }
         Ok(())
     }
 
     /// Execute an action after confirmation (bypasses confirmation check)
-    fn execute_confirmed_action(&mut self, action: Action) -> Result<()> {
+    fn execute_confirmed_action_with_prompt(&mut self, action: Action, custom_prompt: Option<String>) -> Result<()> {
         match action {
             Action::Scan => self.start_scan()?,
-            Action::DescribeWithLlm => self.describe_with_llm()?,
-            Action::BatchLlm => self.start_batch_llm()?,
+            Action::DescribeWithLlm => self.describe_with_llm(custom_prompt)?,
+            Action::BatchLlm => self.start_batch_llm(custom_prompt)?,
             Action::DetectFaces => self.start_face_scan()?,
             Action::ClusterFaces => self.cluster_faces()?,
             Action::ClipEmbedding => self.start_clip_embedding()?,
@@ -3803,7 +3893,16 @@ impl App {
 
     /// Show a confirmation dialog for an expensive action
     fn show_confirmation(&mut self, action: Action) {
-        self.confirm_dialog = Some(ConfirmDialog::new(action));
+        let initial_prompt = if matches!(action, Action::Scan | Action::DescribeWithLlm | Action::BatchLlm) {
+            let dir_str = self.current_dir.to_string_lossy().to_string();
+            self.db.get_directory_prompt(&dir_str)
+                .ok()
+                .flatten()
+                .or_else(|| self.config.llm.custom_prompt.clone())
+        } else {
+            None
+        };
+        self.confirm_dialog = Some(ConfirmDialog::new(action, initial_prompt));
         self.mode = AppMode::Confirming;
     }
 }

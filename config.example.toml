@@ -23,9 +23,16 @@ endpoint = "http://127.0.0.1:1234/v1"
 model = "gemma-3-4b"
 # api_key = "sk-..."  # Required for openai/anthropic
 
-# Custom prompt context prepended to image descriptions
+# Custom prompt context prepended to image descriptions (global default)
 # Use this to fine-tune responses (e.g., shorter output, specific focus)
 # custom_prompt = "Keep responses brief, under 50 words. Focus only on the main subject."
+#
+# Per-folder prompts: When you confirm a Scan, LLM Describe, or Batch LLM action,
+# you can edit a per-folder prompt in the confirmation dialog. Per-folder prompts
+# are stored in the database and override the global custom_prompt for that directory.
+
+# Override the base LLM prompt entirely (replaces the built-in prompt)
+# base_prompt = "Describe this photo briefly. List the main subject and any people visible. Then write TAGS: followed by comma-separated tags."
 
 [scanner]
 # Supported image extensions

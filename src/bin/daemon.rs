@@ -364,6 +364,11 @@ fn execute_llm_batch_task(
 ) -> Result<()> {
     info!("Running LLM batch processing for: {}", target_path);
 
+    // Look up per-folder prompt, falling back to global config
+    let dir_prompt = db.get_directory_prompt(target_path)
+        .ok()
+        .flatten();
+
     // Get photos without descriptions in this directory
     let photos = db.get_photos_without_description_in_directory(target_path, 50)?;
 
@@ -375,7 +380,7 @@ fn execute_llm_batch_task(
     info!("Processing {} photos with LLM", photos.len());
 
     for (id, path) in photos {
-        match call_llm_for_description(&path, config) {
+        match call_llm_for_description(&path, config, dir_prompt.as_deref()) {
             Ok(description) => {
                 db.save_photo_description_by_id(id, &description)?;
                 info!("Generated description for {}", path);
@@ -392,7 +397,7 @@ fn execute_llm_batch_task(
     Ok(())
 }
 
-fn call_llm_for_description(image_path: &str, config: &Config) -> Result<String> {
+fn call_llm_for_description(image_path: &str, config: &Config, dir_prompt: Option<&str>) -> Result<String> {
     use base64::Engine;
 
     // Read and encode image
@@ -400,9 +405,11 @@ fn call_llm_for_description(image_path: &str, config: &Config) -> Result<String>
         .context("Failed to read image")?;
     let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_data);
 
-    // Build prompt
-    let base_prompt = "Describe this image in detail. Include information about: the main subjects, the setting/location, lighting and atmosphere, any notable objects, and the overall mood. Keep the description factual and concise (2-3 sentences).";
-    let prompt = match &config.llm.custom_prompt {
+    // Build prompt: per-folder prompt overrides global custom_prompt
+    let default_base_prompt = "Describe this image in detail. Include information about: the main subjects, the setting/location, lighting and atmosphere, any notable objects, and the overall mood. Keep the description factual and concise (2-3 sentences).";
+    let base_prompt = config.llm.base_prompt.as_deref().unwrap_or(default_base_prompt);
+    let custom_prompt = dir_prompt.or(config.llm.custom_prompt.as_deref());
+    let prompt = match custom_prompt {
         Some(context) => format!("Context: {}\n\n{}", context, base_prompt),
         None => base_prompt.to_string(),
     };

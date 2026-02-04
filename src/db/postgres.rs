@@ -2051,6 +2051,39 @@ impl PgDb {
         Ok(())
     }
 
+    // ========================================================================
+    // Directory prompt operations
+    // ========================================================================
+
+    pub fn get_directory_prompt(&self, directory: &str) -> Result<Option<String>> {
+        let mut client = self.pool.get()?;
+        let row = client.query_opt(
+            "SELECT custom_prompt FROM directory_prompts WHERE directory = $1",
+            &[&directory],
+        )?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
+    pub fn set_directory_prompt(&self, directory: &str, prompt: &str) -> Result<()> {
+        let mut client = self.pool.get()?;
+        if prompt.is_empty() {
+            client.execute(
+                "DELETE FROM directory_prompts WHERE directory = $1",
+                &[&directory],
+            )?;
+        } else {
+            client.execute(
+                r#"
+                INSERT INTO directory_prompts (directory, custom_prompt, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (directory) DO UPDATE SET custom_prompt = $2, updated_at = NOW()
+                "#,
+                &[&directory, &prompt],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn count_photos_without_faces_in_dir(&self, directory: &str) -> Result<i64> {
         let mut client = self.pool.get()?;
         let row = client.query_one(

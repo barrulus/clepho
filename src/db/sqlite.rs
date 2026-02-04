@@ -1895,6 +1895,38 @@ impl SqliteDb {
         Ok(())
     }
 
+    // ========================================================================
+    // Directory prompt operations
+    // ========================================================================
+
+    pub fn get_directory_prompt(&self, directory: &str) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT custom_prompt FROM directory_prompts WHERE directory = ?",
+            [directory],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(prompt) => Ok(Some(prompt)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn set_directory_prompt(&self, directory: &str, prompt: &str) -> Result<()> {
+        if prompt.is_empty() {
+            self.conn.execute(
+                "DELETE FROM directory_prompts WHERE directory = ?",
+                [directory],
+            )?;
+        } else {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO directory_prompts (directory, custom_prompt, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                rusqlite::params![directory, prompt],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn count_photos_without_faces_in_dir(&self, directory: &str) -> Result<i64> {
         let count: i64 = self.conn.query_row(
             r#"

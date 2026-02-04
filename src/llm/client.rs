@@ -79,7 +79,6 @@ impl LlmClient {
     }
 
     /// Create a new LlmClient from configuration
-    #[allow(dead_code)]
     pub fn from_config(config: &LlmConfig) -> Self {
         let provider = create_provider(config);
 
