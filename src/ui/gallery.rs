@@ -541,22 +541,43 @@ impl GalleryView {
 
 /// Render the gallery view
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Borrow db separately to get rotation info
-    let db = &app.db;
+    // First pass: poll async loads, compute layout, and collect visible paths
+    let (columns, visible_rows, visible_paths) = {
+        let gallery = match app.gallery_view.as_mut() {
+            Some(g) => g,
+            None => return,
+        };
 
-    let gallery = match app.gallery_view.as_mut() {
-        Some(g) => g,
-        None => return,
-    };
+        // Poll for completed thumbnail loads once per frame (not per cell)
+        gallery.poll_async_loads();
 
-    // Poll for completed thumbnail loads once per frame (not per cell)
-    gallery.poll_async_loads();
+        // Calculate grid layout
+        let columns = gallery.columns(area.width);
+        let visible_rows = gallery.visible_rows(area.height.saturating_sub(3)); // -3 for header/footer
+        gallery.update_layout_cache(columns, visible_rows);
+        gallery.ensure_visible(columns, visible_rows);
 
-    // Calculate grid layout
-    let columns = gallery.columns(area.width);
-    let visible_rows = gallery.visible_rows(area.height.saturating_sub(3)); // -3 for header/footer
-    gallery.update_layout_cache(columns, visible_rows);
-    gallery.ensure_visible(columns, visible_rows);
+        // Collect visible image paths for rotation pre-computation
+        let start_row = gallery.scroll_offset;
+        let start_idx = start_row * columns;
+        let end_idx = ((start_row + visible_rows) * columns).min(gallery.images.len());
+        let visible_paths: Vec<_> = (start_idx..end_idx)
+            .filter(|&i| i < gallery.images.len())
+            .map(|i| gallery.images[i].clone())
+            .collect();
+
+        (columns, visible_rows, visible_paths)
+    }; // gallery borrow released here
+
+    // Pre-compute rotations for visible images (cached to avoid per-frame DB queries)
+    let mut rotations = std::collections::HashMap::new();
+    for path in &visible_paths {
+        let rotation = app.get_photo_rotation(path);
+        rotations.insert(path.clone(), rotation);
+    }
+
+    // Second pass: render with pre-computed rotations
+    let gallery = app.gallery_view.as_mut().unwrap();
 
     // Main layout: header + grid + footer
     let chunks = Layout::default()
@@ -571,8 +592,8 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Render header
     render_header(frame, gallery, chunks[0]);
 
-    // Render thumbnail grid with database access for rotation
-    render_grid(frame, gallery, db, chunks[1], columns, visible_rows);
+    // Render thumbnail grid with pre-computed rotations
+    render_grid(frame, gallery, &rotations, chunks[1], columns, visible_rows);
 
     // Render footer with controls
     render_footer(frame, gallery, chunks[2]);
@@ -596,7 +617,7 @@ fn render_header(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, db: &crate::db::Database, area: Rect, columns: usize, visible_rows: usize) {
+fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, rotations: &std::collections::HashMap<std::path::PathBuf, i32>, area: Rect, columns: usize, visible_rows: usize) {
     let cell_width = gallery.thumbnail_size.cell_width();
     let cell_height = gallery.thumbnail_size.cell_height();
 
@@ -631,8 +652,8 @@ fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, db: &crate::db::Dat
                 let is_cursor = image_idx == gallery.selected;
                 let is_selected = gallery.is_selected(image_idx);
                 let path = gallery.images[image_idx].clone();
-                // Get rotation from database (combines EXIF + user rotation)
-                let rotation = db.get_photo_rotation(&path).unwrap_or(0);
+                // Use pre-computed rotation (cached to avoid per-frame DB queries)
+                let rotation = rotations.get(&path).copied().unwrap_or(0);
                 render_thumbnail_cell(frame, gallery, &path, *cell_area, is_cursor, is_selected, rotation);
             }
         }

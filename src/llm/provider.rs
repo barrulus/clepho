@@ -73,6 +73,7 @@ pub struct OpenAICompatibleProvider {
     api_key: Option<String>,
     embedding_model: String,
     custom_prompt: Option<String>,
+    base_prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -143,6 +144,7 @@ impl OpenAICompatibleProvider {
             api_key: api_key.map(|s| s.to_string()),
             embedding_model: "text-embedding-ada-002".to_string(),
             custom_prompt: None,
+            base_prompt: None,
         }
     }
 
@@ -157,8 +159,13 @@ impl OpenAICompatibleProvider {
         self
     }
 
+    pub fn with_base_prompt(mut self, prompt: Option<String>) -> Self {
+        self.base_prompt = prompt;
+        self
+    }
+
     fn get_image_prompt(&self) -> String {
-        build_image_prompt(self.custom_prompt.as_deref())
+        build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref())
     }
 }
 
@@ -390,11 +397,12 @@ fn base_image_prompt() -> &'static str {
      TAGS: nature, sunset, mountain, landscape"
 }
 
-/// Builds the full prompt with optional custom context
-fn build_image_prompt(custom_prompt: Option<&str>) -> String {
+/// Builds the full prompt with optional custom context and optional base prompt override
+fn build_image_prompt(custom_prompt: Option<&str>, base_prompt: Option<&str>) -> String {
+    let base = base_prompt.unwrap_or_else(|| base_image_prompt());
     match custom_prompt {
-        Some(context) => format!("Context: {}\n\n{}", context, base_image_prompt()),
-        None => base_image_prompt().to_string(),
+        Some(context) => format!("Context: {}\n\n{}", context, base),
+        None => base.to_string(),
     }
 }
 
@@ -426,6 +434,7 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     custom_prompt: Option<String>,
+    base_prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -474,11 +483,17 @@ impl AnthropicProvider {
             api_key: api_key.to_string(),
             model: model.unwrap_or("claude-sonnet-4-20250514").to_string(),
             custom_prompt: None,
+            base_prompt: None,
         }
     }
 
     pub fn with_custom_prompt(mut self, prompt: Option<String>) -> Self {
         self.custom_prompt = prompt;
+        self
+    }
+
+    pub fn with_base_prompt(mut self, prompt: Option<String>) -> Self {
+        self.base_prompt = prompt;
         self
     }
 }
@@ -501,7 +516,7 @@ impl LlmProvider for AnthropicProvider {
                         },
                     },
                     AnthropicContent::Text {
-                        text: build_image_prompt(self.custom_prompt.as_deref()),
+                        text: build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref()),
                     },
                 ],
             }],
@@ -633,6 +648,7 @@ pub struct OllamaProvider {
     model: String,
     embedding_model: String,
     custom_prompt: Option<String>,
+    base_prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -666,6 +682,7 @@ impl OllamaProvider {
             model: model.to_string(),
             embedding_model: "nomic-embed-text".to_string(), // Default embedding model
             custom_prompt: None,
+            base_prompt: None,
         }
     }
 
@@ -679,6 +696,11 @@ impl OllamaProvider {
         self.custom_prompt = prompt;
         self
     }
+
+    pub fn with_base_prompt(mut self, prompt: Option<String>) -> Self {
+        self.base_prompt = prompt;
+        self
+    }
 }
 
 impl LlmProvider for OllamaProvider {
@@ -687,7 +709,7 @@ impl LlmProvider for OllamaProvider {
 
         let request = OllamaRequest {
             model: self.model.clone(),
-            prompt: build_image_prompt(self.custom_prompt.as_deref()),
+            prompt: build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref()),
             images: vec![base64_image],
             stream: false,
         };
@@ -815,6 +837,7 @@ use crate::config::{LlmConfig, LlmProviderType};
 /// Create an LLM provider based on configuration
 pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
     let custom_prompt = config.custom_prompt.clone();
+    let base_prompt = config.base_prompt.clone();
 
     match config.provider {
         LlmProviderType::LmStudio => Box::new(
@@ -823,7 +846,8 @@ pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
                 &config.model,
                 config.api_key.as_deref(),
             )
-            .with_custom_prompt(custom_prompt),
+            .with_custom_prompt(custom_prompt)
+            .with_base_prompt(base_prompt),
         ),
         LlmProviderType::OpenAI => Box::new(
             OpenAICompatibleProvider::new(
@@ -831,18 +855,21 @@ pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
                 &config.model,
                 config.api_key.as_deref(),
             )
-            .with_custom_prompt(custom_prompt),
+            .with_custom_prompt(custom_prompt)
+            .with_base_prompt(base_prompt),
         ),
         LlmProviderType::Anthropic => {
             let api_key = config.api_key.as_deref().unwrap_or("");
             Box::new(
                 AnthropicProvider::new(api_key, Some(&config.model))
-                    .with_custom_prompt(custom_prompt),
+                    .with_custom_prompt(custom_prompt)
+                    .with_base_prompt(base_prompt),
             )
         }
         LlmProviderType::Ollama => Box::new(
             OllamaProvider::new(Some(&config.endpoint), &config.model)
-                .with_custom_prompt(custom_prompt),
+                .with_custom_prompt(custom_prompt)
+                .with_base_prompt(base_prompt),
         ),
     }
 }

@@ -21,6 +21,8 @@ pub struct ImagePreviewState {
     image_cache: HashMap<PathBuf, StatefulProtocol>,
     /// Cache of photo metadata from database keyed by path
     pub metadata_cache: HashMap<PathBuf, Option<PhotoMetadata>>,
+    /// Cache of photo rotation from database keyed by path
+    rotation_cache: HashMap<PathBuf, i32>,
     /// Paths currently being loaded in background (images)
     loading_images: HashSet<PathBuf>,
     /// Receiver for async image loading (resized DynamicImage)
@@ -55,6 +57,7 @@ impl ImagePreviewState {
             picker,
             image_cache: HashMap::new(),
             metadata_cache: HashMap::new(),
+            rotation_cache: HashMap::new(),
             loading_images: HashSet::new(),
             image_receiver: Some(img_rx),
             image_sender: img_tx,
@@ -122,6 +125,16 @@ impl ImagePreviewState {
         self.metadata_cache.insert(path, metadata);
     }
 
+    /// Get cached rotation for a path. Returns None if not in cache.
+    pub fn get_cached_rotation(&self, path: &PathBuf) -> Option<i32> {
+        self.rotation_cache.get(path).copied()
+    }
+
+    /// Cache rotation for a path (called from App after database lookup)
+    pub fn cache_rotation(&mut self, path: PathBuf, rotation: i32) {
+        self.rotation_cache.insert(path, rotation);
+    }
+
     /// Check if metadata is cached for a path
     #[allow(dead_code)]
     pub fn has_cached_metadata(&self, path: &PathBuf) -> bool {
@@ -140,6 +153,7 @@ impl ImagePreviewState {
         if let Some(ref path) = self.current_path.clone() {
             self.image_cache.remove(path);
             self.metadata_cache.remove(path);
+            self.rotation_cache.remove(path);
             // Also invalidate on-disk thumbnail cache for all rotations
             self.thumbnail_manager.invalidate(path);
         }
@@ -149,6 +163,7 @@ impl ImagePreviewState {
     pub fn invalidate_thumbnail(&mut self, path: &PathBuf) {
         self.image_cache.remove(path);
         self.metadata_cache.remove(path);
+        self.rotation_cache.remove(path);
         self.thumbnail_manager.invalidate(path);
     }
 
@@ -392,8 +407,8 @@ fn render_image_preview(
 
         // Render image or loading indicator
         let thumbnail_size = app.config.preview.thumbnail_size;
-        // Get rotation from database (combines EXIF + user rotation)
-        let rotation = app.db.get_photo_rotation(&entry.path).unwrap_or(0);
+        // Get rotation from database (cached to avoid per-frame DB queries)
+        let rotation = app.get_photo_rotation(&entry.path);
         if let Some(protocol) = app.image_preview.load_image(&entry.path, thumbnail_size, rotation) {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, chunks[0], protocol);
