@@ -1570,11 +1570,22 @@ impl App {
             let client = LlmClient::from_config(&llm_config);
             let _ = tx.send(TaskUpdate::Started { total: 1 });
 
-            match client.describe_image(&path) {
-                Ok(description) => {
-                    // Save to database
+            match client.describe_and_tag_image(&path) {
+                Ok((description, tags)) => {
+                    // Save to database with tags and embeddings
                     if let Ok(db) = Database::open(&db_config) {
-                        let _ = db.save_description(&path, &description);
+                        if let Ok(Some(meta)) = db.get_photo_metadata(&path) {
+                            let tags_json = serde_json::to_string(&tags).unwrap_or_default();
+                            let _ = db.save_llm_result(meta.id, &description, &tags_json);
+
+                            if client.supports_embeddings() {
+                                if let Ok(embedding) = client.get_text_embedding(&description) {
+                                    let _ = db.store_embedding(meta.id, &embedding, "text-embedding");
+                                }
+                            }
+                        } else {
+                            let _ = db.save_description(&path, &description);
+                        }
                     }
                     let _ = tx.send(TaskUpdate::Completed {
                         message: format!("Description saved for {}", path.file_name().unwrap_or_default().to_string_lossy()),

@@ -188,7 +188,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                 ],
             }],
             max_tokens: 500,
-            temperature: 0.7,
+            temperature: 0.3,
         };
 
         let url = format!("{}/chat/completions", self.endpoint);
@@ -273,38 +273,13 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let data_url = format!("data:{};base64,{}", mime_type, base64_image);
 
-        let face_detection_prompt = r#"Analyze this image and detect all human faces present.
-
-For each face found, provide:
-1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
-2. A brief description (age estimate, expression, any notable features)
-3. Your confidence level (0-1)
-
-Return the results as JSON in this exact format:
-{
-  "faces": [
-    {
-      "x_percent": <number 0-100>,
-      "y_percent": <number 0-100>,
-      "width_percent": <number 0-100>,
-      "height_percent": <number 0-100>,
-      "description": "<brief description>",
-      "confidence": <number 0-1>
-    }
-  ]
-}
-
-If no faces are found, return: {"faces": []}
-
-Return ONLY the JSON, no other text."#;
-
         let request = OpenAIChatRequest {
             model: self.model.clone(),
             messages: vec![OpenAIMessage {
                 role: "user".to_string(),
                 content: vec![
                     OpenAIContentPart::Text {
-                        text: face_detection_prompt.to_string(),
+                        text: FACE_DETECTION_PROMPT.to_string(),
                     },
                     OpenAIContentPart::ImageUrl {
                         image_url: ImageUrl { url: data_url },
@@ -381,6 +356,32 @@ fn load_and_encode_image(image_path: &Path, max_dimension: u32) -> Result<(Strin
     let base64_image = BASE64.encode(buf.into_inner());
     Ok((base64_image, "image/jpeg"))
 }
+
+/// The face detection prompt shared across all providers.
+const FACE_DETECTION_PROMPT: &str = r#"Analyze this image and detect all human faces present.
+
+For each face found, provide:
+1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
+2. A brief description (age estimate, expression, any notable features)
+3. Your confidence level (0-1)
+
+Return the results as JSON in this exact format:
+{
+  "faces": [
+    {
+      "x_percent": <number 0-100>,
+      "y_percent": <number 0-100>,
+      "width_percent": <number 0-100>,
+      "height_percent": <number 0-100>,
+      "description": "<brief description>",
+      "confidence": <number 0-1>
+    }
+  ]
+}
+
+If no faces are found, return: {"faces": []}
+
+Return ONLY the JSON, no other text."#;
 
 /// Returns the base image description prompt.
 /// The LLM is asked to return both a description and tags in a single response,
@@ -560,31 +561,6 @@ impl LlmProvider for AnthropicProvider {
             _ => "image/jpeg",
         };
 
-        let face_detection_prompt = r#"Analyze this image and detect all human faces present.
-
-For each face found, provide:
-1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
-2. A brief description (age estimate, expression, any notable features)
-3. Your confidence level (0-1)
-
-Return the results as JSON in this exact format:
-{
-  "faces": [
-    {
-      "x_percent": <number 0-100>,
-      "y_percent": <number 0-100>,
-      "width_percent": <number 0-100>,
-      "height_percent": <number 0-100>,
-      "description": "<brief description>",
-      "confidence": <number 0-1>
-    }
-  ]
-}
-
-If no faces are found, return: {"faces": []}
-
-Return ONLY the JSON, no other text."#;
-
         let request = AnthropicRequest {
             model: self.model.clone(),
             max_tokens: 1000,
@@ -599,7 +575,7 @@ Return ONLY the JSON, no other text."#;
                         },
                     },
                     AnthropicContent::Text {
-                        text: face_detection_prompt.to_string(),
+                        text: FACE_DETECTION_PROMPT.to_string(),
                     },
                 ],
             }],
@@ -768,34 +744,9 @@ impl LlmProvider for OllamaProvider {
         let image_data = std::fs::read(image_path)?;
         let base64_image = BASE64.encode(&image_data);
 
-        let face_detection_prompt = r#"Analyze this image and detect all human faces present.
-
-For each face found, provide:
-1. The approximate bounding box as percentages of the image (x, y, width, height from 0-100)
-2. A brief description (age estimate, expression, any notable features)
-3. Your confidence level (0-1)
-
-Return the results as JSON in this exact format:
-{
-  "faces": [
-    {
-      "x_percent": <number 0-100>,
-      "y_percent": <number 0-100>,
-      "width_percent": <number 0-100>,
-      "height_percent": <number 0-100>,
-      "description": "<brief description>",
-      "confidence": <number 0-1>
-    }
-  ]
-}
-
-If no faces are found, return: {"faces": []}
-
-Return ONLY the JSON, no other text."#;
-
         let request = OllamaRequest {
             model: self.model.clone(),
-            prompt: face_detection_prompt.to_string(),
+            prompt: FACE_DETECTION_PROMPT.to_string(),
             images: vec![base64_image],
             stream: false,
         };
