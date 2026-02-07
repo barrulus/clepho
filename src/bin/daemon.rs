@@ -362,6 +362,9 @@ fn execute_llm_batch_task(
     config: &Config,
     db: &Database,
 ) -> Result<()> {
+    use clepho::llm::LlmClient;
+    use std::path::Path;
+
     info!("Running LLM batch processing for: {}", target_path);
 
     // Look up per-folder prompt, falling back to global config
@@ -379,14 +382,39 @@ fn execute_llm_batch_task(
 
     info!("Processing {} photos with LLM", photos.len());
 
+    // Build LlmClient using the shared provider system
+    let mut llm_config = config.llm.clone();
+    if let Some(prompt) = dir_prompt {
+        llm_config.custom_prompt = Some(prompt);
+    }
+    let client = LlmClient::from_config(&llm_config);
+
+    let mut consecutive_failures = 0u32;
+    const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
     for (id, path) in photos {
-        match call_llm_for_description(&path, config, dir_prompt.as_deref()) {
-            Ok(description) => {
-                db.save_photo_description_by_id(id, &description)?;
+        match client.describe_and_tag_image(Path::new(&path)) {
+            Ok((description, tags)) => {
+                let tags_json = serde_json::to_string(&tags).unwrap_or_default();
+                let _ = db.save_llm_result(id, &description, &tags_json);
+
+                if client.supports_embeddings() {
+                    if let Ok(embedding) = client.get_text_embedding(&description) {
+                        let _ = db.store_embedding(id, &embedding, "text-embedding");
+                    }
+                }
+
                 info!("Generated description for {}", path);
+                consecutive_failures = 0;
             }
             Err(e) => {
+                consecutive_failures += 1;
                 warn!("Failed to generate description for {}: {}", path, e);
+
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                    error!("Aborting LLM batch: {} consecutive failures (server may be unavailable)", consecutive_failures);
+                    break;
+                }
             }
         }
 
@@ -395,67 +423,6 @@ fn execute_llm_batch_task(
     }
 
     Ok(())
-}
-
-fn call_llm_for_description(image_path: &str, config: &Config, dir_prompt: Option<&str>) -> Result<String> {
-    use base64::Engine;
-
-    // Read and encode image
-    let image_data = std::fs::read(image_path)
-        .context("Failed to read image")?;
-    let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_data);
-
-    // Build prompt: per-folder prompt overrides global custom_prompt
-    let default_base_prompt = "Describe this image in detail. Include information about: the main subjects, the setting/location, lighting and atmosphere, any notable objects, and the overall mood. Keep the description factual and concise (2-3 sentences).";
-    let base_prompt = config.llm.base_prompt.as_deref().unwrap_or(default_base_prompt);
-    let custom_prompt = dir_prompt.or(config.llm.custom_prompt.as_deref());
-    let prompt = match custom_prompt {
-        Some(context) => format!("Context: {}\n\n{}", context, base_prompt),
-        None => base_prompt.to_string(),
-    };
-
-    // Make API request
-    let body = serde_json::json!({
-        "model": config.llm.model,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": prompt
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": format!("data:image/jpeg;base64,{}", base64_image)
-                    }
-                }
-            ]
-        }],
-        "max_tokens": 300
-    });
-
-    let url = format!("{}/chat/completions", config.llm.endpoint.trim_end_matches('/'));
-
-    let mut request = ureq::post(&url)
-        .set("Content-Type", "application/json");
-
-    if let Some(ref key) = config.llm.api_key {
-        request = request.set("Authorization", &format!("Bearer {}", key));
-    }
-
-    let response: serde_json::Value = request
-        .send_json(&body)
-        .context("Failed to send request to LLM")?
-        .into_json()
-        .context("Failed to parse LLM response")?;
-
-    let description = response["choices"][0]["message"]["content"]
-        .as_str()
-        .context("No content in LLM response")?
-        .to_string();
-
-    Ok(description)
 }
 
 fn execute_face_detection_task(target_path: &str, db: &Database) -> Result<()> {

@@ -3,18 +3,18 @@ mod centralise;
 mod clip;
 mod export;
 mod faces;
-mod llm;
 mod logging;
 mod scanner;
 mod schedule;
-mod tasks;
 mod trash;
 mod ui;
 
 // Re-export shared modules from library crate so binary submodules
-// can use them via `crate::config` and `crate::db`.
+// can use them via `crate::config`, `crate::db`, `crate::llm`, `crate::tasks`.
 pub(crate) use clepho::config;
 pub(crate) use clepho::db;
+pub(crate) use clepho::llm;
+pub(crate) use clepho::tasks;
 
 use anyhow::Result;
 use crossterm::{
