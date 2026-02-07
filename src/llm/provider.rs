@@ -88,7 +88,14 @@ struct OpenAIChatRequest {
 #[derive(Debug, Serialize)]
 struct OpenAIMessage {
     role: String,
-    content: Vec<OpenAIContentPart>,
+    content: OpenAIContent,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum OpenAIContent {
+    Text(String),
+    Parts(Vec<OpenAIContentPart>),
 }
 
 #[derive(Debug, Serialize)]
@@ -181,17 +188,23 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let request = OpenAIChatRequest {
             model: self.model.clone(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: vec![
-                    OpenAIContentPart::Text {
-                        text: self.get_image_prompt(),
-                    },
-                    OpenAIContentPart::ImageUrl {
-                        image_url: ImageUrl { url: data_url },
-                    },
-                ],
-            }],
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: OpenAIContent::Text(SYSTEM_PROMPT.to_string()),
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: OpenAIContent::Parts(vec![
+                        OpenAIContentPart::Text {
+                            text: self.get_image_prompt(),
+                        },
+                        OpenAIContentPart::ImageUrl {
+                            image_url: ImageUrl { url: data_url },
+                        },
+                    ]),
+                },
+            ],
             max_tokens: 500,
             temperature: 0.3,
         };
@@ -262,17 +275,23 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let request = OpenAIChatRequest {
             model: self.model.clone(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: vec![
-                    OpenAIContentPart::Text {
-                        text: FACE_DETECTION_PROMPT.to_string(),
-                    },
-                    OpenAIContentPart::ImageUrl {
-                        image_url: ImageUrl { url: data_url },
-                    },
-                ],
-            }],
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: OpenAIContent::Text(SYSTEM_PROMPT.to_string()),
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: OpenAIContent::Parts(vec![
+                        OpenAIContentPart::Text {
+                            text: FACE_DETECTION_PROMPT.to_string(),
+                        },
+                        OpenAIContentPart::ImageUrl {
+                            image_url: ImageUrl { url: data_url },
+                        },
+                    ]),
+                },
+            ],
             max_tokens: 1000,
             temperature: 0.3,
         };
@@ -341,6 +360,9 @@ fn load_and_encode_image(image_path: &Path, max_dimension: u32) -> Result<(Strin
 }
 
 /// The face detection prompt shared across all providers.
+/// System prompt for photo cataloguing tasks.
+const SYSTEM_PROMPT: &str = "You are a photo cataloguing assistant. Describe images factually and concisely. Always follow the requested output format exactly.";
+
 const FACE_DETECTION_PROMPT: &str = r#"Analyze this image and detect all human faces present.
 
 For each face found, provide:
@@ -426,6 +448,7 @@ pub struct AnthropicProvider {
 struct AnthropicRequest {
     model: String,
     max_tokens: u32,
+    system: String,
     messages: Vec<AnthropicMessage>,
 }
 
@@ -494,6 +517,7 @@ impl LlmProvider for AnthropicProvider {
         let request = AnthropicRequest {
             model: self.model.clone(),
             max_tokens: 500,
+            system: SYSTEM_PROMPT.to_string(),
             messages: vec![AnthropicMessage {
                 role: "user".to_string(),
                 content: vec![
@@ -539,6 +563,7 @@ impl LlmProvider for AnthropicProvider {
         let request = AnthropicRequest {
             model: self.model.clone(),
             max_tokens: 1000,
+            system: SYSTEM_PROMPT.to_string(),
             messages: vec![AnthropicMessage {
                 role: "user".to_string(),
                 content: vec![
@@ -603,6 +628,7 @@ pub struct OllamaProvider {
 struct OllamaRequest {
     model: String,
     prompt: String,
+    system: String,
     images: Vec<String>,
     stream: bool,
 }
@@ -662,6 +688,7 @@ impl LlmProvider for OllamaProvider {
         let request = OllamaRequest {
             model: self.model.clone(),
             prompt: build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref()),
+            system: SYSTEM_PROMPT.to_string(),
             images: vec![base64_image],
             stream: false,
         };
@@ -714,6 +741,7 @@ impl LlmProvider for OllamaProvider {
         let request = OllamaRequest {
             model: self.model.clone(),
             prompt: FACE_DETECTION_PROMPT.to_string(),
+            system: SYSTEM_PROMPT.to_string(),
             images: vec![base64_image],
             stream: false,
         };

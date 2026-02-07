@@ -160,7 +160,7 @@ pub struct DirEntry {
 impl App {
     pub fn new(config: Config, db: Database) -> Result<Self> {
         let current_dir = std::env::current_dir()?;
-        let llm_client = LlmClient::new(&config.llm.endpoint, &config.llm.model);
+        let llm_client = LlmClient::from_config(&config.llm);
         let image_preview = ImagePreviewState::new(config.preview.protocol, &config.thumbnails);
         let trash_manager = TrashManager::new(config.trash.clone());
         let duplicate_trash_manager = TrashManager::new_from_duplicate_config(config.duplicate_trash.clone());
