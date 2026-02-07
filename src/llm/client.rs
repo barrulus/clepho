@@ -106,12 +106,31 @@ impl LlmClient {
     pub fn describe_and_tag_image(&self, image_path: &Path) -> Result<(String, Vec<String>)> {
         let response = self.provider.describe_image(image_path)?;
 
-        if let Some(tags_idx) = response.find("TAGS:") {
-            let description = response[..tags_idx].trim().to_string();
-            let tags_str = response[tags_idx + 5..].trim();
+        // Find TAGS: delimiter case-insensitively, anchored to line start.
+        // Also handles markdown bold like **TAGS:** or **Tags:**
+        let tags_pos = response.lines().enumerate().find_map(|(_, line)| {
+            let trimmed = line.trim().trim_start_matches('*');
+            if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("tags:") {
+                // Return byte offset of the tags content after "TAGS:"
+                let line_start = line.as_ptr() as usize - response.as_ptr() as usize;
+                let prefix_offset = line.len() - trimmed.len();
+                // Find the colon position to get content after it
+                if let Some(colon) = trimmed.find(':') {
+                    Some((line_start, prefix_offset + colon + 1))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+
+        if let Some((line_start, tags_content_offset)) = tags_pos {
+            let description = response[..line_start].trim().to_string();
+            let tags_str = response[line_start + tags_content_offset..].trim().trim_end_matches('*');
             let tags: Vec<String> = tags_str
                 .split(',')
-                .map(|t| t.trim().to_lowercase())
+                .map(|t| t.trim().trim_matches('*').to_lowercase())
                 .filter(|t| !t.is_empty())
                 .collect();
             Ok((description, tags))

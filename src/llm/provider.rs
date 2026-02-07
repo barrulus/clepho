@@ -74,6 +74,7 @@ pub struct OpenAICompatibleProvider {
     embedding_model: String,
     custom_prompt: Option<String>,
     base_prompt: Option<String>,
+    agent: ureq::Agent,
 }
 
 #[derive(Debug, Serialize)]
@@ -138,6 +139,9 @@ struct EmbeddingData {
 
 impl OpenAICompatibleProvider {
     pub fn new(endpoint: &str, model: &str, api_key: Option<&str>) -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(120))
+            .build();
         Self {
             endpoint: endpoint.to_string(),
             model: model.to_string(),
@@ -145,6 +149,7 @@ impl OpenAICompatibleProvider {
             embedding_model: "text-embedding-ada-002".to_string(),
             custom_prompt: None,
             base_prompt: None,
+            agent,
         }
     }
 
@@ -193,11 +198,7 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let url = format!("{}/chat/completions", self.endpoint);
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(120))
-            .build();
-
-        let mut req = agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
 
         if let Some(ref api_key) = self.api_key {
             req = req.set("Authorization", &format!("Bearer {}", api_key));
@@ -230,11 +231,7 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let url = format!("{}/embeddings", self.endpoint);
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(60))
-            .build();
-
-        let mut req = agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
 
         if let Some(ref api_key) = self.api_key {
             req = req.set("Authorization", &format!("Bearer {}", api_key));
@@ -260,17 +257,7 @@ impl LlmProvider for OpenAICompatibleProvider {
     }
 
     fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
-
-        let mime_type = match image_path.extension().and_then(|e| e.to_str()) {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg",
-        };
-
+        let (base64_image, mime_type) = load_and_encode_image(image_path, 2048)?;
         let data_url = format!("data:{};base64,{}", mime_type, base64_image);
 
         let request = OpenAIChatRequest {
@@ -292,11 +279,7 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let url = format!("{}/chat/completions", self.endpoint);
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(120))
-            .build();
-
-        let mut req = agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
 
         if let Some(ref api_key) = self.api_key {
             req = req.set("Authorization", &format!("Bearer {}", api_key));
@@ -436,6 +419,7 @@ pub struct AnthropicProvider {
     model: String,
     custom_prompt: Option<String>,
     base_prompt: Option<String>,
+    agent: ureq::Agent,
 }
 
 #[derive(Debug, Serialize)]
@@ -480,11 +464,15 @@ struct AnthropicResponseContent {
 
 impl AnthropicProvider {
     pub fn new(api_key: &str, model: Option<&str>) -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(120))
+            .build();
         Self {
             api_key: api_key.to_string(),
             model: model.unwrap_or("claude-sonnet-4-20250514").to_string(),
             custom_prompt: None,
             base_prompt: None,
+            agent,
         }
     }
 
@@ -523,11 +511,7 @@ impl LlmProvider for AnthropicProvider {
             }],
         };
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(120))
-            .build();
-
-        let response = agent.post("https://api.anthropic.com/v1/messages")
+        let response = self.agent.post("https://api.anthropic.com/v1/messages")
             .set("Content-Type", "application/json")
             .set("x-api-key", &self.api_key)
             .set("anthropic-version", "2023-06-01")
@@ -550,16 +534,7 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
-
-        let media_type = match image_path.extension().and_then(|e| e.to_str()) {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("webp") => "image/webp",
-            _ => "image/jpeg",
-        };
+        let (base64_image, media_type) = load_and_encode_image(image_path, 2048)?;
 
         let request = AnthropicRequest {
             model: self.model.clone(),
@@ -581,11 +556,7 @@ impl LlmProvider for AnthropicProvider {
             }],
         };
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(120))
-            .build();
-
-        let response = agent.post("https://api.anthropic.com/v1/messages")
+        let response = self.agent.post("https://api.anthropic.com/v1/messages")
             .set("Content-Type", "application/json")
             .set("x-api-key", &self.api_key)
             .set("anthropic-version", "2023-06-01")
@@ -625,6 +596,7 @@ pub struct OllamaProvider {
     embedding_model: String,
     custom_prompt: Option<String>,
     base_prompt: Option<String>,
+    agent: ureq::Agent,
 }
 
 #[derive(Debug, Serialize)]
@@ -653,12 +625,16 @@ struct OllamaEmbeddingResponse {
 
 impl OllamaProvider {
     pub fn new(endpoint: Option<&str>, model: &str) -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(180))
+            .build();
         Self {
             endpoint: endpoint.unwrap_or("http://localhost:11434").to_string(),
             model: model.to_string(),
             embedding_model: "nomic-embed-text".to_string(), // Default embedding model
             custom_prompt: None,
             base_prompt: None,
+            agent,
         }
     }
 
@@ -692,11 +668,7 @@ impl LlmProvider for OllamaProvider {
 
         let url = format!("{}/api/generate", self.endpoint);
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(180))
-            .build();
-
-        let response = agent.post(&url)
+        let response = self.agent.post(&url)
             .set("Content-Type", "application/json")
             .send_json(&request)
             .map_err(|e| anyhow!("Ollama request failed: {}", e))?;
@@ -720,11 +692,7 @@ impl LlmProvider for OllamaProvider {
 
         let url = format!("{}/api/embeddings", self.endpoint);
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(60))
-            .build();
-
-        let response = agent.post(&url)
+        let response = self.agent.post(&url)
             .set("Content-Type", "application/json")
             .send_json(&request)
             .map_err(|e| anyhow!("Ollama embedding request failed: {}", e))?;
@@ -741,8 +709,7 @@ impl LlmProvider for OllamaProvider {
     }
 
     fn detect_faces(&self, image_path: &Path) -> Result<FaceDetectionResponse> {
-        let image_data = std::fs::read(image_path)?;
-        let base64_image = BASE64.encode(&image_data);
+        let (base64_image, _mime_type) = load_and_encode_image(image_path, 2048)?;
 
         let request = OllamaRequest {
             model: self.model.clone(),
@@ -753,11 +720,7 @@ impl LlmProvider for OllamaProvider {
 
         let url = format!("{}/api/generate", self.endpoint);
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(180))
-            .build();
-
-        let response = agent.post(&url)
+        let response = self.agent.post(&url)
             .set("Content-Type", "application/json")
             .send_json(&request)
             .map_err(|e| anyhow!("Ollama face detection request failed: {}", e))?;
