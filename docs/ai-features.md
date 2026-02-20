@@ -186,8 +186,13 @@ Describe this image in detail. Include information about:
 4) Any text visible in the image
 Keep the description concise but informative.
 
-After the description, on a new line write TAGS: followed by a comma-separated
-list of relevant tags for organizing this photo.
+Respond with a JSON object containing exactly two fields:
+- "description": your image description as a single string
+- "tags": an array of lowercase tag strings for organizing this photo
+
+Example: {"description": "A golden sunset over mountain peaks...", "tags": ["nature", "sunset", "mountain", "landscape"]}
+
+Return ONLY the JSON object, no other text.
 ```
 
 #### Example Custom Prompts
@@ -210,13 +215,25 @@ Describe this image concisely in 2-3 sentences. No introductions or preambles.
 If people are present, focus on them: who they appear to be, what they're doing, expressions.
 If no people, describe the location and notable objects.
 
-After the description, on a new line write TAGS: followed by comma-separated tags.
+Respond with a JSON object: {"description": "your description here", "tags": ["tag1", "tag2"]}
+Return ONLY the JSON object, no other text.
 """
 ```
 
-**Important:** Your base prompt must include instructions for the `TAGS:` line, since tag parsing depends on that format. If you omit it, tags will not be extracted.
+**Important:** Your base prompt should include instructions for the JSON format. Clepho uses a three-tier parsing strategy: it first tries to parse the response as JSON (`{"description": "...", "tags": [...]}`), then tries extracting JSON from markdown code blocks, and finally falls back to the legacy `TAGS:` delimiter format. For best results, instruct the LLM to return JSON.
 
 When both `custom_prompt` and `base_prompt` are set, `custom_prompt` is still prepended as context to your custom base prompt.
+
+### JSON Mode
+
+By default, Clepho requests structured JSON output from the LLM provider using their native JSON mode APIs. This significantly improves tag extraction reliability. If your model doesn't support JSON mode, disable it:
+
+```toml
+[llm]
+json_mode = false
+```
+
+When `json_mode` is disabled (or the LLM returns non-JSON despite the setting), Clepho falls back to parsing `TAGS:` delimiters from the response text.
 
 ### Per-Folder Prompts
 
@@ -234,9 +251,9 @@ This is useful when different directories contain different types of photos (e.g
 
 | Goal | Base Prompt |
 |------|-------------|
-| Minimal tagging | `"List comma-separated tags for this image. Write TAGS: followed by the tags."` |
-| People-focused | `"Describe who is in this photo, what they look like, and what they are doing. Then write TAGS: followed by relevant tags."` |
-| Location-focused | `"Describe where this photo was taken, including any landmarks or notable features. Then write TAGS: followed by relevant tags."` |
+| Minimal tagging | `"Return JSON: {\"description\": \"brief description\", \"tags\": [\"tag1\", \"tag2\"]}"` |
+| People-focused | `"Describe who is in this photo, what they look like, and what they are doing. Return JSON: {\"description\": \"...\", \"tags\": [...]}"` |
+| Location-focused | `"Describe where this photo was taken, including any landmarks. Return JSON: {\"description\": \"...\", \"tags\": [...]}"` |
 
 ## Semantic Search
 

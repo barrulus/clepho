@@ -36,8 +36,15 @@ model = "gemma-3-4b"
 # custom_prompt = "These are photos from a 1985 family reunion in Texas."
 
 # Override the base LLM prompt entirely (replaces the built-in prompt)
-# Must include TAGS: format instruction for tag parsing to work
-# base_prompt = "Describe this image concisely in 2-3 sentences. Then write TAGS: followed by comma-separated tags."
+# Must include JSON format instruction for structured parsing to work
+# base_prompt = "Describe this photo briefly. Respond with JSON: {\"description\": \"...\", \"tags\": [\"tag1\", \"tag2\"]}"
+
+# Number of concurrent LLM requests for batch processing (default: 4)
+# batch_concurrency = 4
+
+# Request structured JSON output from the LLM provider (default: true)
+# Disable if your model doesn't support JSON mode (e.g. some LM Studio models)
+# json_mode = true
 
 # Embedding model for semantic search (optional)
 # embedding_model = "text-embedding-ada-002"
@@ -166,7 +173,9 @@ See [database.md](database.md) for more details
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `custom_prompt` | (none) | Context prepended to the base prompt (e.g. `"These are wedding photos"`) |
-| `base_prompt` | (built-in) | Replaces the entire base prompt. Must include `TAGS:` format instruction |
+| `base_prompt` | (built-in) | Replaces the entire base prompt. Must include JSON format instruction |
+| `batch_concurrency` | `4` | Number of concurrent LLM requests for batch processing |
+| `json_mode` | `true` | Request structured JSON output from the provider |
 
 See [AI Features](ai-features.md#customizing-the-prompt) for detailed examples.
 

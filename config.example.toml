@@ -32,7 +32,16 @@ model = "gemma-3-4b"
 # are stored in the database and override the global custom_prompt for that directory.
 
 # Override the base LLM prompt entirely (replaces the built-in prompt)
-# base_prompt = "Describe this photo briefly. List the main subject and any people visible. Then write TAGS: followed by comma-separated tags."
+# Must include JSON format instruction for structured parsing to work.
+# base_prompt = "Describe this photo briefly. Respond with JSON: {\"description\": \"...\", \"tags\": [\"tag1\", \"tag2\"]}"
+
+# Number of concurrent LLM requests for batch processing (default: 4)
+# batch_concurrency = 4
+
+# Request structured JSON output from the LLM provider (default: true)
+# Uses native JSON mode for OpenAI-compatible and Ollama providers.
+# Disable if your model doesn't support JSON mode (e.g. some LM Studio models).
+# json_mode = true
 
 [scanner]
 # Supported image extensions

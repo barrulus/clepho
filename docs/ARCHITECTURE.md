@@ -41,7 +41,8 @@ src/
 │   └── hashing.rs       # MD5, SHA256, perceptual hashing
 └── llm/
     ├── mod.rs           # LLM module exports
-    ├── client.rs        # LM Studio API client
+    ├── client.rs        # LLM client with JSON response parsing
+    ├── provider.rs      # Provider implementations (OpenAI, Anthropic, Ollama)
     └── queue.rs         # Batch processing queue
 ```
 
@@ -99,10 +100,12 @@ Background scanning process:
 
 ### LLM Integration (`llm/`)
 
-LM Studio integration using ureq HTTP client:
-- Single image description (D key)
-- Batch processing (P key)
-- Descriptions stored in database and cached in memory
+Multi-provider LLM integration using ureq HTTP client:
+- **Providers** (`provider.rs`): OpenAI-compatible (LM Studio, OpenAI), Anthropic, and Ollama, with optional JSON mode for structured output
+- **Client** (`client.rs`): Three-tier response parsing — JSON → code block extraction → TAGS: delimiter fallback
+- **Queue** (`queue.rs`): Parallel batch processing with configurable concurrency
+- Single image description (`i` key), batch processing (`I` key)
+- Descriptions and tags stored in database
 
 ## Data Flow
 
