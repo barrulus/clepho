@@ -1572,6 +1572,9 @@ impl App {
 
             match client.describe_and_tag_image(&path) {
                 Ok((description, tags)) => {
+                    if tags.is_empty() {
+                        tracing::warn!(path = %path.display(), "LLM returned empty tags for photo");
+                    }
                     // Save to database with tags and embeddings
                     if let Ok(db) = Database::open(&db_config) {
                         if let Ok(Some(meta)) = db.get_photo_metadata(&path) {

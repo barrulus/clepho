@@ -1684,6 +1684,30 @@ impl SqliteDb {
         Ok(result)
     }
 
+    pub fn get_photos_with_empty_tags(&self) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, path FROM photos
+            WHERE llm_processed_at IS NOT NULL
+              AND (tags IS NULL OR tags = '[]' OR tags = '')
+            ORDER BY llm_processed_at ASC
+            "#,
+        )?;
+        let results = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(results)
+    }
+
+    pub fn clear_llm_result(&self, photo_id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE photos SET description = NULL, tags = NULL, llm_processed_at = NULL WHERE id = ?",
+            rusqlite::params![photo_id],
+        )?;
+        Ok(())
+    }
+
     // ========================================================================
     // Scanner operations (from scanner/mod.rs)
     // ========================================================================

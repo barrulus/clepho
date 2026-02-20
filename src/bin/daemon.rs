@@ -395,6 +395,9 @@ fn execute_llm_batch_task(
     for (id, path) in photos {
         match client.describe_and_tag_image(Path::new(&path)) {
             Ok((description, tags)) => {
+                if tags.is_empty() {
+                    warn!(path = %path, "LLM returned empty tags for photo");
+                }
                 let tags_json = serde_json::to_string(&tags).unwrap_or_default();
                 let _ = db.save_llm_result(id, &description, &tags_json);
 

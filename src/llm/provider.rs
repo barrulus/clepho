@@ -74,7 +74,14 @@ pub struct OpenAICompatibleProvider {
     embedding_model: String,
     custom_prompt: Option<String>,
     base_prompt: Option<String>,
+    json_mode: bool,
     agent: ureq::Agent,
+}
+
+#[derive(Debug, Serialize)]
+struct ResponseFormat {
+    #[serde(rename = "type")]
+    format_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +90,8 @@ struct OpenAIChatRequest {
     messages: Vec<OpenAIMessage>,
     max_tokens: u32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat>,
 }
 
 #[derive(Debug, Serialize)]
@@ -156,6 +165,7 @@ impl OpenAICompatibleProvider {
             embedding_model: "text-embedding-ada-002".to_string(),
             custom_prompt: None,
             base_prompt: None,
+            json_mode: false,
             agent,
         }
     }
@@ -176,6 +186,11 @@ impl OpenAICompatibleProvider {
         self
     }
 
+    pub fn with_json_mode(mut self, json_mode: bool) -> Self {
+        self.json_mode = json_mode;
+        self
+    }
+
     fn get_image_prompt(&self) -> String {
         build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref())
     }
@@ -185,6 +200,12 @@ impl LlmProvider for OpenAICompatibleProvider {
     fn describe_image(&self, image_path: &Path) -> Result<String> {
         let (base64_image, mime_type) = load_and_encode_image(image_path, 1024)?;
         let data_url = format!("data:{};base64,{}", mime_type, base64_image);
+
+        let response_format = if self.json_mode {
+            Some(ResponseFormat { format_type: "json_object".to_string() })
+        } else {
+            None
+        };
 
         let request = OpenAIChatRequest {
             model: self.model.clone(),
@@ -207,6 +228,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             ],
             max_tokens: 500,
             temperature: 0.3,
+            response_format,
         };
 
         let url = format!("{}/chat/completions", self.endpoint);
@@ -294,6 +316,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             ],
             max_tokens: 1000,
             temperature: 0.3,
+            response_format: None,
         };
 
         let url = format!("{}/chat/completions", self.endpoint);
@@ -361,7 +384,7 @@ fn load_and_encode_image(image_path: &Path, max_dimension: u32) -> Result<(Strin
 
 /// The face detection prompt shared across all providers.
 /// System prompt for photo cataloguing tasks.
-const SYSTEM_PROMPT: &str = "You are a photo cataloguing assistant. Describe images factually and concisely. Always follow the requested output format exactly.";
+const SYSTEM_PROMPT: &str = "You are a photo cataloguing assistant. Describe images factually and concisely. Always respond with valid JSON in the exact format requested.";
 
 const FACE_DETECTION_PROMPT: &str = r#"Analyze this image and detect all human faces present.
 
@@ -389,18 +412,19 @@ If no faces are found, return: {"faces": []}
 Return ONLY the JSON, no other text."#;
 
 /// Returns the base image description prompt.
-/// The LLM is asked to return both a description and tags in a single response,
-/// separated by a `TAGS:` delimiter line.
+/// The LLM is asked to return a JSON object with description and tags fields.
 fn base_image_prompt() -> &'static str {
-    "Describe this image in detail. Include information about: \
-     1) The main subject or scene \
-     2) Notable objects, people, or elements \
-     3) Colors, lighting, and mood \
-     4) Any text visible in the image \
+    "Describe this image in detail. Include information about:\n\
+     1) The main subject or scene\n\
+     2) Notable objects, people, or elements\n\
+     3) Colors, lighting, and mood\n\
+     4) Any text visible in the image\n\
      Keep the description concise but informative.\n\n\
-     After the description, on a new line write TAGS: followed by a comma-separated list \
-     of relevant tags for organizing this photo. Example format:\n\
-     TAGS: nature, sunset, mountain, landscape"
+     Respond with a JSON object containing exactly two fields:\n\
+     - \"description\": your image description as a single string\n\
+     - \"tags\": an array of lowercase tag strings for organizing this photo\n\n\
+     Example: {\"description\": \"A golden sunset over mountain peaks...\", \"tags\": [\"nature\", \"sunset\", \"mountain\", \"landscape\"]}\n\n\
+     Return ONLY the JSON object, no other text."
 }
 
 /// Builds the full prompt with optional custom context and optional base prompt override
@@ -413,8 +437,7 @@ fn build_image_prompt(custom_prompt: Option<&str>, base_prompt: Option<&str>) ->
 }
 
 /// Extract JSON from a string that might contain markdown code blocks
-#[allow(dead_code)]
-fn extract_json(content: &str) -> String {
+pub(crate) fn extract_json(content: &str) -> String {
     let trimmed = content.trim();
 
     // Check for markdown code block
@@ -621,6 +644,7 @@ pub struct OllamaProvider {
     embedding_model: String,
     custom_prompt: Option<String>,
     base_prompt: Option<String>,
+    json_mode: bool,
     agent: ureq::Agent,
 }
 
@@ -631,6 +655,8 @@ struct OllamaRequest {
     system: String,
     images: Vec<String>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -660,6 +686,7 @@ impl OllamaProvider {
             embedding_model: "nomic-embed-text".to_string(), // Default embedding model
             custom_prompt: None,
             base_prompt: None,
+            json_mode: false,
             agent,
         }
     }
@@ -679,11 +706,22 @@ impl OllamaProvider {
         self.base_prompt = prompt;
         self
     }
+
+    pub fn with_json_mode(mut self, json_mode: bool) -> Self {
+        self.json_mode = json_mode;
+        self
+    }
 }
 
 impl LlmProvider for OllamaProvider {
     fn describe_image(&self, image_path: &Path) -> Result<String> {
         let (base64_image, _mime_type) = load_and_encode_image(image_path, 1024)?;
+
+        let format = if self.json_mode {
+            Some(serde_json::json!("json"))
+        } else {
+            None
+        };
 
         let request = OllamaRequest {
             model: self.model.clone(),
@@ -691,6 +729,7 @@ impl LlmProvider for OllamaProvider {
             system: SYSTEM_PROMPT.to_string(),
             images: vec![base64_image],
             stream: false,
+            format,
         };
 
         let url = format!("{}/api/generate", self.endpoint);
@@ -744,6 +783,7 @@ impl LlmProvider for OllamaProvider {
             system: SYSTEM_PROMPT.to_string(),
             images: vec![base64_image],
             stream: false,
+            format: None,
         };
 
         let url = format!("{}/api/generate", self.endpoint);
@@ -780,6 +820,7 @@ use crate::config::{LlmConfig, LlmProviderType};
 pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
     let custom_prompt = config.custom_prompt.clone();
     let base_prompt = config.base_prompt.clone();
+    let json_mode = config.json_mode;
 
     match config.provider {
         LlmProviderType::LmStudio => Box::new(
@@ -789,7 +830,8 @@ pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
                 config.api_key.as_deref(),
             )
             .with_custom_prompt(custom_prompt)
-            .with_base_prompt(base_prompt),
+            .with_base_prompt(base_prompt)
+            .with_json_mode(json_mode),
         ),
         LlmProviderType::OpenAI => Box::new(
             OpenAICompatibleProvider::new(
@@ -798,7 +840,8 @@ pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
                 config.api_key.as_deref(),
             )
             .with_custom_prompt(custom_prompt)
-            .with_base_prompt(base_prompt),
+            .with_base_prompt(base_prompt)
+            .with_json_mode(json_mode),
         ),
         LlmProviderType::Anthropic => {
             let api_key = config.api_key.as_deref().unwrap_or("");
@@ -811,7 +854,8 @@ pub fn create_provider(config: &LlmConfig) -> Box<dyn LlmProvider> {
         LlmProviderType::Ollama => Box::new(
             OllamaProvider::new(Some(&config.endpoint), &config.model)
                 .with_custom_prompt(custom_prompt)
-                .with_base_prompt(base_prompt),
+                .with_base_prompt(base_prompt)
+                .with_json_mode(json_mode),
         ),
     }
 }

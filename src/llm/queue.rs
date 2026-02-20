@@ -242,6 +242,11 @@ impl LlmQueue {
 
 fn process_task(client: &LlmClient, task: &LlmTask, db: &Database) -> Result<()> {
     let (description, tags) = client.describe_and_tag_image(&task.photo_path)?;
+
+    if tags.is_empty() {
+        tracing::warn!(path = %task.photo_path.display(), "LLM returned empty tags for photo");
+    }
+
     let tags_json = serde_json::to_string(&tags)?;
 
     db.save_llm_result(task.photo_id, &description, &tags_json)?;

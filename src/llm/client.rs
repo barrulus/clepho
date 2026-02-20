@@ -1,9 +1,17 @@
 use anyhow::Result;
+use serde::Deserialize;
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::LlmConfig;
-use super::provider::{create_provider, LlmProvider};
+use super::provider::{create_provider, extract_json, LlmProvider};
+
+/// Structured response from the LLM for image description and tagging
+#[derive(Debug, Deserialize)]
+pub struct ImageDescription {
+    pub description: String,
+    pub tags: Vec<String>,
+}
 
 /// LLM client that wraps a provider implementation
 pub struct LlmClient {
@@ -21,20 +29,40 @@ impl LlmClient {
     }
 
     /// Describe an image and generate tags in a single LLM call.
-    /// The LLM response is expected to contain a description followed by a `TAGS:` line.
-    /// Falls back to using the full response as description with empty tags if delimiter not found.
+    ///
+    /// Uses a three-tier parsing strategy:
+    /// 1. Direct JSON parse of the response
+    /// 2. Extract JSON from markdown code blocks, then parse
+    /// 3. Fall back to TAGS: delimiter parsing (legacy format)
     pub fn describe_and_tag_image(&self, image_path: &Path) -> Result<(String, Vec<String>)> {
         let response = self.provider.describe_image(image_path)?;
 
-        // Find TAGS: delimiter case-insensitively, anchored to line start.
-        // Also handles markdown bold like **TAGS:** or **Tags:**
+        // Tier 1: Try direct JSON parse
+        if let Ok(parsed) = serde_json::from_str::<ImageDescription>(&response) {
+            return Ok((parsed.description, parsed.tags));
+        }
+
+        // Tier 2: Try extracting JSON from code blocks
+        let extracted = extract_json(&response);
+        if extracted != response.trim() {
+            if let Ok(parsed) = serde_json::from_str::<ImageDescription>(&extracted) {
+                tracing::warn!("LLM response required code block extraction to parse JSON");
+                return Ok((parsed.description, parsed.tags));
+            }
+        }
+
+        // Tier 3: Fall back to TAGS: delimiter parsing
+        tracing::warn!("LLM response is not valid JSON, falling back to TAGS: delimiter parsing");
+        Self::parse_tags_delimiter(&response)
+    }
+
+    /// Legacy TAGS: delimiter parsing for non-JSON responses
+    fn parse_tags_delimiter(response: &str) -> Result<(String, Vec<String>)> {
         let tags_pos = response.lines().enumerate().find_map(|(_, line)| {
             let trimmed = line.trim().trim_start_matches('*');
             if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("tags:") {
-                // Return byte offset of the tags content after "TAGS:"
                 let line_start = line.as_ptr() as usize - response.as_ptr() as usize;
                 let prefix_offset = line.len() - trimmed.len();
-                // Find the colon position to get content after it
                 if let Some(colon) = trimmed.find(':') {
                     Some((line_start, prefix_offset + colon + 1))
                 } else {
@@ -55,7 +83,7 @@ impl LlmClient {
                 .collect();
             Ok((description, tags))
         } else {
-            Ok((response, Vec::new()))
+            Ok((response.to_string(), Vec::new()))
         }
     }
 

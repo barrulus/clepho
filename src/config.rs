@@ -705,10 +705,19 @@ pub struct LlmConfig {
     /// Number of concurrent LLM requests for batch processing (default: 4)
     #[serde(default = "default_batch_concurrency")]
     pub batch_concurrency: usize,
+
+    /// Whether to request structured JSON output from the LLM provider.
+    /// Disable for providers that don't support JSON mode (e.g. some LM Studio models).
+    #[serde(default = "default_json_mode")]
+    pub json_mode: bool,
 }
 
 fn default_batch_concurrency() -> usize {
     4
+}
+
+fn default_json_mode() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

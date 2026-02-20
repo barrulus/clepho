@@ -607,6 +607,16 @@ impl Database {
         dispatch!(self, get_photo_description(photo_id))
     }
 
+    /// Get photos that were processed by LLM but have empty/missing tags
+    pub fn get_photos_with_empty_tags(&self) -> Result<Vec<(i64, String)>> {
+        dispatch!(self, get_photos_with_empty_tags())
+    }
+
+    /// Clear LLM results for a photo so it can be re-processed
+    pub fn clear_llm_result(&self, photo_id: i64) -> Result<()> {
+        dispatch!(self, clear_llm_result(photo_id))
+    }
+
     // ========================================================================
     // Scanner operations
     // ========================================================================

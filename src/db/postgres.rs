@@ -1814,6 +1814,30 @@ impl PgDb {
         Ok(row.and_then(|r| r.get(0)))
     }
 
+    pub fn get_photos_with_empty_tags(&self) -> Result<Vec<(i64, String)>> {
+        let mut client = self.pool.get()?;
+        let rows = client.query(
+            r#"
+            SELECT id, path FROM photos
+            WHERE llm_processed_at IS NOT NULL
+              AND (tags IS NULL OR tags = '[]' OR tags = '')
+            ORDER BY llm_processed_at ASC
+            "#,
+            &[],
+        )?;
+        let results = rows.iter().map(|row| (row.get(0), row.get(1))).collect();
+        Ok(results)
+    }
+
+    pub fn clear_llm_result(&self, photo_id: i64) -> Result<()> {
+        let mut client = self.pool.get()?;
+        client.execute(
+            "UPDATE photos SET description = NULL, tags = NULL, llm_processed_at = NULL WHERE id = $1",
+            &[&photo_id],
+        )?;
+        Ok(())
+    }
+
     // ========================================================================
     // Scanner operations
     // ========================================================================
