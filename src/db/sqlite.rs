@@ -39,7 +39,13 @@ impl SqliteDb {
 
     fn run_migrations(&self) -> Result<()> {
         for migration in MIGRATIONS {
-            let _ = self.conn.execute(migration, []);
+            if let Err(e) = self.conn.execute(migration, []) {
+                let msg = e.to_string();
+                if msg.contains("duplicate column") {
+                    continue;
+                }
+                return Err(anyhow::anyhow!("migration failed: {e} — SQL: {migration}"));
+            }
         }
         Ok(())
     }
