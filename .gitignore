@@ -17,3 +17,9 @@ result-*
 
 # Test data
 sample_images/
+
+.envrc
+.direnv/
+
+# Worktrees for parallel branch work
+.worktrees/
