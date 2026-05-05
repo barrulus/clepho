@@ -1,5 +1,6 @@
 mod schema;
 pub mod albums;
+pub mod clock;
 pub mod embeddings;
 pub mod faces;
 pub mod schedule;
@@ -18,6 +19,7 @@ use anyhow::Result;
 use std::path::Path;
 
 pub use schema::{SCHEMA, MIGRATIONS};
+pub use clock::{Clock, SystemClock, FixedClock};
 pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
 pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, Face, FaceCluster, FaceWithPhoto, Person};
