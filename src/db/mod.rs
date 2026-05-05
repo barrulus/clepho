@@ -4,6 +4,7 @@ pub mod albums;
 pub mod clock;
 pub mod embeddings;
 pub mod faces;
+pub mod migrate;
 pub mod schedule;
 pub mod similarity;
 pub mod sqlite;
@@ -14,7 +15,7 @@ pub mod postgres;
 #[cfg(feature = "postgres")]
 pub mod postgres_schema;
 #[cfg(feature = "postgres")]
-pub mod migrate;
+pub mod migrate_postgres;
 
 use anyhow::Result;
 use std::path::Path;

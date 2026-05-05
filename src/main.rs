@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
 
             let sqlite_path = &config.database.sqlite_path;
             eprintln!("Migrating from SQLite ({}) to PostgreSQL...", sqlite_path.display());
-            db::migrate::migrate_sqlite_to_postgres(sqlite_path, &postgres_url)?;
+            db::migrate_postgres::migrate_sqlite_to_postgres(sqlite_path, &postgres_url)?;
             Ok(())
         }
     }
