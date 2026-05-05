@@ -4,6 +4,7 @@ pub mod albums;
 pub mod clock;
 pub mod embeddings;
 pub mod faces;
+pub mod filter_eval;
 pub mod migrate;
 pub mod pipeline_events;
 pub mod provenance;
