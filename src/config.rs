@@ -38,6 +38,37 @@ pub struct Config {
 
     #[serde(default)]
     pub view: ViewConfig,
+
+    #[serde(default)]
+    pub pipeline: PipelineConfig,
+}
+
+/// Pipeline scheduler config (Task 18 will flesh out config layering;
+/// this is the minimum the scheduler needs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PipelineConfig {
+    pub scan_workers: u32,
+    pub exif_workers: u32,
+    pub thumb_workers: u32,
+    pub llm_workers: u32,
+    pub faces_workers: u32,
+    pub index_workers: u32,
+    pub circuit_breaker_threshold: u32,
+}
+
+impl Default for PipelineConfig {
+    fn default() -> Self {
+        Self {
+            scan_workers: 2,
+            exif_workers: 4,
+            thumb_workers: 4,
+            llm_workers: 2,
+            faces_workers: 2,
+            index_workers: 4,
+            circuit_breaker_threshold: 3,
+        }
+    }
 }
 
 /// View filter settings (persisted across sessions)
@@ -836,6 +867,7 @@ impl Default for Config {
             library: LibraryConfig::default(),
             keybindings: KeyBindings::default(),
             view: ViewConfig::default(),
+            pipeline: PipelineConfig::default(),
         }
     }
 }
