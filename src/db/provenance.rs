@@ -111,6 +111,7 @@ pub fn pipeline_write_facet(
 }
 
 /// User adds a value manually. Sets source='user', confirmed_at=now().
+/// Per spec §6.4, also clears any matching rejected_suggestions row.
 #[allow(dead_code)]
 pub fn user_add_facet(
     conn: &Connection,
@@ -120,8 +121,39 @@ pub fn user_add_facet(
     clock: &dyn Clock,
 ) -> Result<WriteOutcome> {
     let now = clock.now().to_rfc3339();
+    let tx = conn.unchecked_transaction()?;
 
-    let existing: Option<String> = conn
+    let (rejected_key, value_name): (&str, String) = match table {
+        FacetTable::PhotoObjects => {
+            let n: String = tx.query_row(
+                "SELECT name FROM objects WHERE id=?1",
+                params![value_id],
+                |r| r.get(0),
+            )?;
+            ("object", n)
+        }
+        FacetTable::PhotoUserTags => {
+            let n: String = tx.query_row(
+                "SELECT name FROM user_tags WHERE id=?1",
+                params![value_id],
+                |r| r.get(0),
+            )?;
+            ("user_tag", n)
+        }
+        FacetTable::Faces => {
+            // Faces don't go through this helper for person assignment in v1.
+            ("person", String::new())
+        }
+    };
+
+    if !value_name.is_empty() {
+        tx.execute(
+            "DELETE FROM rejected_suggestions WHERE photo_id=?1 AND facet=?2 AND value=?3",
+            params![photo_id, rejected_key, value_name],
+        )?;
+    }
+
+    let existing: Option<String> = tx
         .query_row(
             &format!(
                 "SELECT source FROM {} WHERE photo_id = ?1 AND {} = ?2",
@@ -133,9 +165,9 @@ pub fn user_add_facet(
         )
         .optional()?;
 
-    match existing {
+    let outcome = match existing {
         Some(_) => {
-            conn.execute(
+            tx.execute(
                 &format!(
                     "UPDATE {} SET source='user', confirmed_at=?3
                      WHERE photo_id=?1 AND {}=?2",
@@ -144,10 +176,10 @@ pub fn user_add_facet(
                 ),
                 params![photo_id, value_id, now],
             )?;
-            Ok(WriteOutcome::UpdatedConfirmed)
+            WriteOutcome::UpdatedConfirmed
         }
         None => {
-            conn.execute(
+            tx.execute(
                 &format!(
                     "INSERT INTO {} (photo_id, {}, source, confirmed_at) VALUES (?1, ?2, 'user', ?3)",
                     table.name(),
@@ -155,9 +187,11 @@ pub fn user_add_facet(
                 ),
                 params![photo_id, value_id, now],
             )?;
-            Ok(WriteOutcome::Inserted)
+            WriteOutcome::Inserted
         }
-    }
+    };
+    tx.commit()?;
+    Ok(outcome)
 }
 
 /// User accepts an AI suggestion: keeps source='ai' but sets confirmed_at.

@@ -29,6 +29,8 @@ pub use faces::{BoundingBox, Face, FaceCluster, FaceWithPhoto, Person};
 pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
 pub use albums::UserTag;
 #[allow(unused_imports)]
+pub use migrate::{apply_v2_schema, detect_schema_state, reset_to_v2, SchemaState};
+#[allow(unused_imports)]
 pub use provenance::{
     pipeline_write_facet, user_add_facet, user_confirm_facet, user_reject_facet,
     user_remove_facet, Actor, FacetTable, WriteOutcome,
