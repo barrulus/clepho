@@ -91,4 +91,9 @@ ratatui-image = "3"
 csv = "1"
 
 [dev-dependencies]
+insta = { version = "1", features = ["json", "redactions"] }
+proptest = "1"
+mockall = "0.13"
+notify = "6"     # filesystem watcher; tested in Task 21
+serial_test = "3"  # serialise tests that touch shared resources
 tempfile = "3"
