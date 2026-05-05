@@ -2,3 +2,4 @@
 //! Stages, scheduler, log appender, circuit breaker.
 
 pub mod log;
+pub mod stages;
