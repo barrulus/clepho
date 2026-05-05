@@ -1,7 +1,10 @@
 //! Fresh schema for clepho v2. The migration story is "drop + recreate" because
 //! existing data is experimental (see spec §10.1). Faces tables are defined here
 //! but unused in Plan 1 (Plan 2 wires the FaceEngine).
+//!
+//! See: docs/superpowers/specs/2026-05-04-pipeline-tagging-alignment-design.md §3
 
+#[allow(dead_code)]
 pub const SCHEMA_V2: &str = r#"
 -- ============================================================================
 -- photos: per-photo state row (singleton facets + pipeline state)
@@ -243,4 +246,30 @@ CREATE TABLE IF NOT EXISTS schema_version (
 INSERT OR IGNORE INTO schema_version(version) VALUES (2);
 "#;
 
+#[allow(dead_code)]
 pub const SCHEMA_GENERATION: i64 = 2;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn schema_v2_applies_cleanly_to_fresh_db() {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(SCHEMA_V2)
+            .expect("SCHEMA_V2 must be valid SQL");
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |r| r.get(0))
+            .expect("schema_version row should exist");
+        assert_eq!(version, SCHEMA_GENERATION);
+    }
+
+    #[test]
+    fn schema_v2_is_idempotent() {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(SCHEMA_V2).expect("first apply");
+        conn.execute_batch(SCHEMA_V2).expect("second apply must be a no-op");
+    }
+}

@@ -1,4 +1,5 @@
 mod schema;
+pub mod schema_v2;
 pub mod albums;
 pub mod clock;
 pub mod embeddings;
