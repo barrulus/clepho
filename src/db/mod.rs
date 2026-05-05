@@ -5,6 +5,7 @@ pub mod clock;
 pub mod embeddings;
 pub mod faces;
 pub mod migrate;
+pub mod provenance;
 pub mod schedule;
 pub mod similarity;
 pub mod sqlite;
@@ -27,6 +28,11 @@ pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, Face, FaceCluster, FaceWithPhoto, Person};
 pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
 pub use albums::UserTag;
+#[allow(unused_imports)]
+pub use provenance::{
+    pipeline_write_facet, user_add_facet, user_confirm_facet, user_reject_facet,
+    user_remove_facet, Actor, FacetTable, WriteOutcome,
+};
 
 use crate::config::DatabaseConfig;
 #[cfg(feature = "postgres")]
