@@ -90,10 +90,12 @@ ratatui-image = "3"
 # Export functionality
 csv = "1"
 
+# Filesystem watcher for managed folders (used by pipeline::watcher).
+notify = "6"
+
 [dev-dependencies]
 insta = { version = "1", features = ["json", "redactions"] }
 proptest = "1"
 mockall = "0.13"
-notify = "6"     # filesystem watcher; tested in Task 21
 serial_test = "3"  # serialise tests that touch shared resources
 tempfile = "3"

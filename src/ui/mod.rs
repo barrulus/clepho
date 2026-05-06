@@ -12,6 +12,7 @@ pub mod tag_dialog;
 pub mod slideshow;
 pub mod overdue_dialog;
 pub mod people_dialog;
+pub mod pipeline_status;
 pub mod preview;
 pub mod rename_dialog;
 pub mod reset_db_dialog;
