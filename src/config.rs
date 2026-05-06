@@ -41,10 +41,12 @@ pub struct Config {
 
     #[serde(default)]
     pub pipeline: PipelineConfig,
+
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
-/// Pipeline scheduler config (Task 18 will flesh out config layering;
-/// this is the minimum the scheduler needs).
+/// Pipeline scheduler config (spec §4.5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PipelineConfig {
@@ -55,6 +57,9 @@ pub struct PipelineConfig {
     pub faces_workers: u32,
     pub index_workers: u32,
     pub circuit_breaker_threshold: u32,
+    pub thumbnail_cache_dir: Option<PathBuf>,
+    pub thumbnail_max_edge: u32,
+    pub allowed_extensions: Vec<String>,
 }
 
 impl Default for PipelineConfig {
@@ -67,6 +72,33 @@ impl Default for PipelineConfig {
             faces_workers: 2,
             index_workers: 4,
             circuit_breaker_threshold: 3,
+            thumbnail_cache_dir: None,
+            thumbnail_max_edge: 256,
+            allowed_extensions: vec![
+                "jpg", "jpeg", "png", "heic", "webp", "tiff", "tif",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        }
+    }
+}
+
+/// JSONL pipeline log config (spec §8.7).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    pub level: String,
+    pub retention_days: u64,
+    pub log_dir: Option<PathBuf>,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".into(),
+            retention_days: 30,
+            log_dir: None,
         }
     }
 }
@@ -868,6 +900,7 @@ impl Default for Config {
             keybindings: KeyBindings::default(),
             view: ViewConfig::default(),
             pipeline: PipelineConfig::default(),
+            logging: LoggingConfig::default(),
         }
     }
 }
@@ -878,7 +911,8 @@ impl Config {
 
         if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)?;
-            let config: Config = toml::from_str(&content)?;
+            let mut config: Config = toml::from_str(&content)?;
+            config.migrate_legacy_fields();
             Ok(config)
         } else {
             // Create default config
@@ -890,8 +924,26 @@ impl Config {
 
     pub fn load_from(path: &std::path::Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+        config.migrate_legacy_fields();
         Ok(config)
+    }
+
+    /// One-shot migration of fields whose home moved between config layouts.
+    /// Currently: [llm].batch_concurrency → [pipeline].llm_workers when only
+    /// the legacy field has been overridden.
+    fn migrate_legacy_fields(&mut self) {
+        const OLD_BATCH_DEFAULT: usize = 4;
+        const NEW_LLM_WORKERS_DEFAULT: u32 = 2;
+        if self.llm.batch_concurrency != OLD_BATCH_DEFAULT
+            && self.pipeline.llm_workers == NEW_LLM_WORKERS_DEFAULT
+        {
+            self.pipeline.llm_workers = self.llm.batch_concurrency as u32;
+            eprintln!(
+                "[config] Migrated llm.batch_concurrency={} → pipeline.llm_workers",
+                self.pipeline.llm_workers
+            );
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -917,5 +969,52 @@ impl Config {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("clepho")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_and_logging_have_sensible_defaults() {
+        let c = Config::default();
+        assert_eq!(c.pipeline.llm_workers, 2);
+        assert_eq!(c.pipeline.thumbnail_max_edge, 256);
+        assert!(c.pipeline.allowed_extensions.contains(&"jpg".to_string()));
+        assert_eq!(c.logging.level, "info");
+        assert_eq!(c.logging.retention_days, 30);
+    }
+
+    fn from_toml(s: &str) -> Config {
+        let mut c: Config = toml::from_str(s).unwrap();
+        c.migrate_legacy_fields();
+        c
+    }
+
+    #[test]
+    fn legacy_batch_concurrency_migrates_to_llm_workers() {
+        let c = from_toml("[llm]\nbatch_concurrency = 8\n");
+        assert_eq!(c.pipeline.llm_workers, 8);
+    }
+
+    #[test]
+    fn explicit_llm_workers_wins_over_legacy_field() {
+        let c = from_toml(
+            "[llm]\nbatch_concurrency = 8\n\
+             [pipeline]\nllm_workers = 6\n",
+        );
+        assert_eq!(
+            c.pipeline.llm_workers, 6,
+            "user override must not be clobbered"
+        );
+    }
+
+    #[test]
+    fn no_migration_when_user_explicitly_keeps_default() {
+        // [llm] section present so default_batch_concurrency() fires (=4),
+        // and user hasn't touched llm_workers — migration must be a no-op.
+        let c = from_toml("[llm]\n");
+        assert_eq!(c.pipeline.llm_workers, 2);
     }
 }
