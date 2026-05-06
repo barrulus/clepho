@@ -5,3 +5,4 @@ pub mod circuit_breaker;
 pub mod log;
 pub mod scheduler;
 pub mod stages;
+pub mod watcher;
