@@ -68,6 +68,8 @@ pub enum AppMode {
     Centralising,
     Confirming,
     Settings,
+    #[allow(dead_code)] // wired by daemon precheck + pending TUI integration
+    ResetDb,
 }
 
 #[allow(dead_code)]

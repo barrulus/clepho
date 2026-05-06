@@ -41,6 +41,8 @@ struct DaemonConfig {
     once: bool,
     /// Config path override
     config_path: Option<PathBuf>,
+    /// Allow destructive schema reset on legacy DB
+    reset_db: bool,
 }
 
 impl Default for DaemonConfig {
@@ -49,6 +51,7 @@ impl Default for DaemonConfig {
             poll_interval: 60,
             once: false,
             config_path: None,
+            reset_db: false,
         }
     }
 }
@@ -65,6 +68,11 @@ fn main() -> Result<()> {
     // Load application config
     let config = load_config(&daemon_config)?;
     info!("Config loaded");
+
+    // Pre-flight: detect schema generation against the SQLite file directly.
+    // The v2 schema cannot be auto-applied; legacy DBs require an explicit
+    // --reset-db flag (which is destructive).
+    preflight_schema_check(&config, daemon_config.reset_db)?;
 
     // Open database
     let db = Database::open(&config.database)?;
@@ -108,6 +116,9 @@ fn parse_args() -> DaemonConfig {
                     i += 1;
                 }
             }
+            "--reset-db" => {
+                config.reset_db = true;
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -135,6 +146,8 @@ OPTIONS:
     --once, -1          Process pending tasks once and exit
     --interval, -i N    Poll interval in seconds (default: 60)
     --config, -c PATH   Path to config file
+    --reset-db          Drop and recreate the DB if it has the legacy v1 schema
+                        (DESTRUCTIVE — all photos must be rescanned)
     --help, -h          Show this help message
 
 ENVIRONMENT:
@@ -197,6 +210,66 @@ fn load_config(daemon_config: &DaemonConfig) -> Result<Config> {
                 .context("Failed to load config")
         }
     }
+}
+
+/// Detect schema generation on the SQLite file before the rest of the daemon
+/// touches it. Legacy DBs (gen<2) refuse to start unless --reset-db is set;
+/// Newer-than-supported always refuses.
+///
+/// NOTE: this currently only applies to the SQLite backend. Postgres goes
+/// through Database::open unmodified.
+fn preflight_schema_check(config: &Config, reset_db: bool) -> Result<()> {
+    use clepho::db::migrate::{
+        apply_v2_schema, detect_schema_state, reset_to_v2, SchemaState, CURRENT_GENERATION,
+    };
+
+    #[cfg(feature = "postgres")]
+    {
+        if config.database.backend == clepho::config::DatabaseType::Postgresql {
+            return Ok(()); // Postgres has its own migration story
+        }
+    }
+
+    let path = &config.database.sqlite_path;
+    if !path.exists() {
+        return Ok(()); // brand-new install; Database::open will create it
+    }
+
+    let conn = rusqlite::Connection::open(path)
+        .with_context(|| format!("preflight: open {}", path.display()))?;
+
+    match detect_schema_state(&conn)? {
+        SchemaState::Empty => {
+            apply_v2_schema(&conn).context("preflight: apply v2 to empty DB")?;
+            info!("Initialized fresh v2 schema at {}", path.display());
+        }
+        SchemaState::Current => {}
+        SchemaState::Legacy => {
+            if !reset_db {
+                eprintln!(
+                    "ERROR: Database at {} has the legacy v1 schema. clepho v2 cannot \
+                     auto-migrate. Pass --reset-db to drop the existing data and \
+                     start fresh, or open the TUI to confirm interactively.",
+                    path.display()
+                );
+                std::process::exit(2);
+            }
+            warn!(
+                "Resetting database at {} to v2 (--reset-db flag set)",
+                path.display()
+            );
+            reset_to_v2(&conn).context("preflight: reset_to_v2")?;
+        }
+        SchemaState::Newer(v) => {
+            eprintln!(
+                "ERROR: Database schema is newer ({}) than this binary supports ({}). \
+                 Upgrade clepho.",
+                v, CURRENT_GENERATION
+            );
+            std::process::exit(3);
+        }
+    }
+    Ok(())
 }
 
 fn run_daemon_loop(

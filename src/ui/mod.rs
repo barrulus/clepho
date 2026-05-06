@@ -14,6 +14,7 @@ pub mod overdue_dialog;
 pub mod people_dialog;
 pub mod preview;
 pub mod rename_dialog;
+pub mod reset_db_dialog;
 pub mod schedule_dialog;
 pub mod search_dialog;
 pub mod settings_dialog;
