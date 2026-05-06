@@ -15,6 +15,7 @@ pub mod people_dialog;
 pub mod pipeline_status;
 pub mod preview;
 pub mod rename_dialog;
+pub mod reprocess_dialog;
 pub mod reset_db_dialog;
 pub mod schedule_dialog;
 pub mod search_dialog;
