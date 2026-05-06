@@ -39,6 +39,20 @@ impl LlmClient {
         Ok(parse_describe_and_tag_response(&response))
     }
 
+    /// Like `describe_and_tag_image` but lets the caller override the custom
+    /// prompt for this single call. Used by the LLM stage so per-folder
+    /// prompts can flow through without rebuilding the provider.
+    pub fn describe_and_tag_image_with_prompt(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<(String, Vec<String>)> {
+        let response = self
+            .provider
+            .describe_image_with_prompt(image_path, custom_prompt)?;
+        Ok(parse_describe_and_tag_response(&response))
+    }
+
     /// Get text embedding for semantic search
     pub fn get_text_embedding(&self, text: &str) -> Result<Vec<f32>> {
         self.provider.get_text_embedding(text)

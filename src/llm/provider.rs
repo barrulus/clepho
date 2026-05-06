@@ -32,8 +32,21 @@ pub struct FaceDetectionResponse {
 
 /// Trait for LLM providers that can describe images
 pub trait LlmProvider: Send + Sync {
-    /// Describe an image at the given path
-    fn describe_image(&self, image_path: &Path) -> Result<String>;
+    /// Describe an image, optionally overriding the provider's stored custom
+    /// prompt for this single call. Providers that ignore prompts (e.g. ones
+    /// that bake the prompt into a model) can still implement this by simply
+    /// not consulting `custom_prompt`.
+    fn describe_image_with_prompt(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<String>;
+
+    /// Describe an image with the provider's stored custom prompt (or default).
+    /// Default impl forwards to `describe_image_with_prompt` with no override.
+    fn describe_image(&self, image_path: &Path) -> Result<String> {
+        self.describe_image_with_prompt(image_path, None)
+    }
 
     /// Get the provider name for display
     fn provider_name(&self) -> &'static str;
@@ -191,13 +204,20 @@ impl OpenAICompatibleProvider {
         self
     }
 
-    fn get_image_prompt(&self) -> String {
-        build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref())
+    fn get_image_prompt_with_override(&self, custom_prompt: Option<&str>) -> String {
+        build_image_prompt(
+            custom_prompt.or(self.custom_prompt.as_deref()),
+            self.base_prompt.as_deref(),
+        )
     }
 }
 
 impl LlmProvider for OpenAICompatibleProvider {
-    fn describe_image(&self, image_path: &Path) -> Result<String> {
+    fn describe_image_with_prompt(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<String> {
         let (base64_image, mime_type) = load_and_encode_image(image_path, 1024)?;
         let data_url = format!("data:{};base64,{}", mime_type, base64_image);
 
@@ -218,7 +238,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                     role: "user".to_string(),
                     content: OpenAIContent::Parts(vec![
                         OpenAIContentPart::Text {
-                            text: self.get_image_prompt(),
+                            text: self.get_image_prompt_with_override(custom_prompt),
                         },
                         OpenAIContentPart::ImageUrl {
                             image_url: ImageUrl { url: data_url },
@@ -534,7 +554,11 @@ impl AnthropicProvider {
 }
 
 impl LlmProvider for AnthropicProvider {
-    fn describe_image(&self, image_path: &Path) -> Result<String> {
+    fn describe_image_with_prompt(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<String> {
         let (base64_image, media_type) = load_and_encode_image(image_path, 1024)?;
 
         let request = AnthropicRequest {
@@ -552,7 +576,10 @@ impl LlmProvider for AnthropicProvider {
                         },
                     },
                     AnthropicContent::Text {
-                        text: build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref()),
+                        text: build_image_prompt(
+                            custom_prompt.or(self.custom_prompt.as_deref()),
+                            self.base_prompt.as_deref(),
+                        ),
                     },
                 ],
             }],
@@ -714,7 +741,11 @@ impl OllamaProvider {
 }
 
 impl LlmProvider for OllamaProvider {
-    fn describe_image(&self, image_path: &Path) -> Result<String> {
+    fn describe_image_with_prompt(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<String> {
         let (base64_image, _mime_type) = load_and_encode_image(image_path, 1024)?;
 
         let format = if self.json_mode {
@@ -725,7 +756,10 @@ impl LlmProvider for OllamaProvider {
 
         let request = OllamaRequest {
             model: self.model.clone(),
-            prompt: build_image_prompt(self.custom_prompt.as_deref(), self.base_prompt.as_deref()),
+            prompt: build_image_prompt(
+                custom_prompt.or(self.custom_prompt.as_deref()),
+                self.base_prompt.as_deref(),
+            ),
             system: SYSTEM_PROMPT.to_string(),
             images: vec![base64_image],
             stream: false,
