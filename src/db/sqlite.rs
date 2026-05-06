@@ -32,9 +32,28 @@ impl SqliteDb {
     }
 
     pub fn initialize(&self) -> Result<()> {
+        // If the v2 schema is already applied (Task 19's preflight or a
+        // previous run wrote it), don't try to overlay v1 SCHEMA on top —
+        // schema_version will exist with version >= 2 and the v1 SCHEMA
+        // const has tables that conflict with v2 in subtle ways.
+        use crate::db::migrate::{detect_schema_state, SchemaState};
+        match detect_schema_state(&self.conn)? {
+            SchemaState::Current | SchemaState::Newer(_) => return Ok(()),
+            SchemaState::Empty | SchemaState::Legacy => {
+                // Fall through to the v1 path below — needed until the TUI
+                // and daemon both run on v2.
+            }
+        }
+
         self.conn.execute_batch(SCHEMA)?;
         self.run_migrations()?;
         Ok(())
+    }
+
+    /// Return a reference to the underlying rusqlite connection. Used by
+    /// pipeline stages and the scheduler that work directly against SQLite.
+    pub fn raw_conn(&self) -> &Connection {
+        &self.conn
     }
 
     fn run_migrations(&self) -> Result<()> {

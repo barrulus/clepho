@@ -181,6 +181,18 @@ impl Database {
         dispatch!(self, initialize())
     }
 
+    /// Return a raw SQLite connection for callers that drive the v2 pipeline
+    /// directly (stages, scheduler, daemon driver). Returns None on Postgres
+    /// — Plan 1's pipeline is SQLite-only.
+    #[allow(dead_code)]
+    pub fn raw_sqlite_conn(&self) -> Option<&rusqlite::Connection> {
+        match &self.inner {
+            DatabaseInner::Sqlite(db) => Some(db.raw_conn()),
+            #[cfg(feature = "postgres")]
+            DatabaseInner::Postgres(_) => None,
+        }
+    }
+
     // ========================================================================
     // Photo operations
     // ========================================================================
