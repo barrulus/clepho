@@ -4462,7 +4462,13 @@ git commit -m "Add force-reprocess dialog with provenance pre-flight"
 
 ---
 
-### Task 24: BrowseView key handlers (`R`, `M`)
+### Task 24: BrowseView key handlers (`R`, `M`) — FOLDED INTO TASK 28b
+
+> **Status:** Folded into Task 28b Step 6. Every handler in this task needs `Database::raw_sqlite_conn()` (which Task 28b adds) — the `App` currently holds the dispatch-macro `Database`, not a raw `&Connection`. Even the simplest `M` handler can't compile until that lands. Task 28b's Step 6 has the full key wiring spec.
+
+The original task body is preserved below for reference; do **not** execute it as a standalone task.
+
+---
 
 Minimal key wiring for the still-existing browser. (Plan 4 unifies BrowseView/Gallery; Plan 1 just adds these three keys to the existing browser.)
 
@@ -5173,9 +5179,11 @@ Rewrite `src/bin/daemon.rs::run_daemon_loop` and `process_pending_tasks` to be s
 
 Keep the existing CLI flag handling (`--once`, `--interval`, `--config`, `--reset-db`) unchanged.
 
-- [ ] **Step 6: Wire `T` and the new TUI screen**
+- [ ] **Step 6: Wire `T`, `R`, `Shift+R`, and `M` keys (originally Task 24)**
 
-Now that the daemon owns the `CircuitBreaker`, the TUI's `PipelineStatusScreen::ScreenAction::RetryGroup` finally has somewhere to send the breaker reset. Two options:
+Task 24 (BrowseView R/Shift+R/M handlers) was deferred into this task because every handler needs `Database::raw_sqlite_conn()` — the `App` currently holds the dispatch-macro `Database`, not a raw `&Connection`, so even the simplest handler can't compile until Step 2 above lands.
+
+Now that the daemon owns the `CircuitBreaker`, the TUI's `PipelineStatusScreen::ScreenAction::RetryGroup` also finally has somewhere to send the breaker reset. Two options for breaker coordination:
 
 - **(a) IPC-free**: TUI has its own `Arc<CircuitBreaker>` (separate from daemon). RetryGroup just clears the affected `<stage>_error` columns and `<stage>_done_at` markers in the DB; the daemon's breaker reset happens organically on the next observed success.
 - **(b) Shared state**: a small `pipeline_status` table the daemon writes its breaker state into, and the TUI's RetryGroup writes a "please reset" intent the daemon polls on next tick.
@@ -5183,9 +5191,45 @@ Now that the daemon owns the `CircuitBreaker`, the TUI's `PipelineStatusScreen::
 (a) is simpler and matches the "daemon and TUI talk through the DB" principle from spec §1.1. Pick (a) unless something forces otherwise.
 
 In `src/app.rs`:
+
 - Replace the `T → AppMode::TaskList` route with `T → AppMode::PipelineStatus`.
 - Construct `PipelineStatusScreen` on entry with the current `managed_folders::list` and `pipeline_events::unresolved_groups`.
 - Handle `ScreenAction::TogglePause`, `RetryGroup`, `ClearGroup`, `Close` by mutating the DB and refreshing the screen state.
+
+- Add browser-mode key handlers for `R`, `Shift+R`, `M` per spec §4.6:
+
+```rust
+// R — ad-hoc pipeline run on the current folder.
+KeyCode::Char('R') if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+    let folder = self.current_folder().to_path_buf();
+    self.spawn_ad_hoc_run(folder);
+}
+
+// Shift+R — force-reprocess dialog.
+KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+    let folder = self.current_folder().to_string_lossy().into_owned();
+    let conn = self.db.raw_sqlite_conn().expect("v2 daemon requires SQLite");
+    self.reprocess_dialog = Some(crate::ui::reprocess_dialog::ReprocessDialog::new(conn, folder)?);
+    self.mode = AppMode::Reprocessing;
+}
+
+// M — toggle managed status of the current folder.
+KeyCode::Char('M') => {
+    let folder = self.current_folder().to_string_lossy().into_owned();
+    let conn = self.db.raw_sqlite_conn().expect("v2 daemon requires SQLite");
+    if crate::db::managed_folders::is_managed(conn, &folder)? {
+        crate::db::managed_folders::remove(conn, &folder)?;
+        self.toast("Folder unmanaged");
+    } else {
+        crate::db::managed_folders::add(conn, &folder, None)?;
+        self.toast(&format!("Folder managed: {}", folder));
+    }
+}
+```
+
+`spawn_ad_hoc_run` opens its own `rusqlite::Connection` on a worker thread and calls `scheduler.run_pass(&conn, Some(&folder))` so the UI thread doesn't block. If a `toast` mechanism doesn't exist, add a `transient_status: Option<(String, Instant)>` field on `App` and render it in the status bar for ~3s.
+
+The `Reprocessing` AppMode and `reprocess_dialog: Option<ReprocessDialog>` field on `App` were both deferred from Task 23 — add them here. The `Confirm(stages)` outcome calls `clepho::pipeline::reprocess::apply_reset(conn, &folder, &stages)` and then triggers `spawn_ad_hoc_run(folder)` so the cleared stages re-run immediately.
 
 #### Verification
 
