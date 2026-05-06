@@ -6,17 +6,21 @@ use r2d2::Pool;
 use r2d2_postgres::PostgresConnectionManager;
 use std::path::Path;
 
-use super::{PhotoMetadata, ExportedPhotoRow, exif_orientation_to_degrees, read_exif_rotation_from_file};
-use super::embeddings::{SearchResult, EmbeddingRecord, embedding_to_bytes, bytes_to_embedding, cosine_similarity};
-use super::faces::{
-    BoundingBox, Face, FaceCluster, FaceWithPhoto, Person,
-    embedding_to_bytes as face_embedding_to_bytes, bytes_to_embedding as face_bytes_to_embedding,
+use super::albums::{Album, UserTag};
+use super::embeddings::{
+    bytes_to_embedding, cosine_similarity, embedding_to_bytes, EmbeddingRecord, SearchResult,
 };
+use super::faces::{
+    bytes_to_embedding as face_bytes_to_embedding, embedding_to_bytes as face_embedding_to_bytes,
+    BoundingBox, Face, FaceCluster, FaceWithPhoto, Person,
+};
+use super::postgres_schema::POSTGRES_SCHEMA;
+use super::schedule::{ScheduleStatus, ScheduledTask, ScheduledTaskType};
 use super::similarity::{PhotoRecord, SimilarityGroup};
 use super::trash::TrashedPhoto;
-use super::schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
-use super::albums::{UserTag, Album};
-use super::postgres_schema::POSTGRES_SCHEMA;
+use super::{
+    exif_orientation_to_degrees, read_exif_rotation_from_file, ExportedPhotoRow, PhotoMetadata,
+};
 
 pub struct PgDb {
     pool: Pool<PostgresConnectionManager<NoTls>>,
@@ -38,15 +42,11 @@ fn hamming_distance(hash1: &str, hash2: &str) -> Result<u32> {
 /// Helper to parse a postgres Row into a ScheduledTask.
 fn row_to_scheduled_task(row: &postgres::Row) -> ScheduledTask {
     let task_type_str: String = row.get(1);
-    let task_type = ScheduledTaskType::from_str(&task_type_str)
-        .unwrap_or(ScheduledTaskType::Scan);
+    let task_type = ScheduledTaskType::from_str(&task_type_str).unwrap_or(ScheduledTaskType::Scan);
     let photo_ids_json: Option<String> = row.get(3);
-    let photo_ids = photo_ids_json.and_then(|json| {
-        serde_json::from_str::<Vec<i64>>(&json).ok()
-    });
+    let photo_ids = photo_ids_json.and_then(|json| serde_json::from_str::<Vec<i64>>(&json).ok());
     let status_str: String = row.get(7);
-    let status = ScheduleStatus::from_str(&status_str)
-        .unwrap_or(ScheduleStatus::Pending);
+    let status = ScheduleStatus::from_str(&status_str).unwrap_or(ScheduleStatus::Pending);
     let hours_start: Option<i32> = row.get(5);
     let hours_end: Option<i32> = row.get(6);
     ScheduledTask {
@@ -68,9 +68,7 @@ fn row_to_scheduled_task(row: &postgres::Row) -> ScheduledTask {
 impl PgDb {
     pub fn open(url: &str, pool_size: u32) -> Result<Self> {
         let manager = PostgresConnectionManager::new(url.parse()?, NoTls);
-        let pool = Pool::builder()
-            .max_size(pool_size)
-            .build(manager)?;
+        let pool = Pool::builder().max_size(pool_size).build(manager)?;
         Ok(Self { pool })
     }
 
@@ -119,16 +117,16 @@ impl PgDb {
         Ok(())
     }
 
-    pub fn get_photos_mtime_in_dir(&self, directory: &str) -> Result<Vec<(String, Option<String>)>> {
+    pub fn get_photos_mtime_in_dir(
+        &self,
+        directory: &str,
+    ) -> Result<Vec<(String, Option<String>)>> {
         let mut client = self.pool.get()?;
         let rows = client.query(
             "SELECT path, modified_at FROM photos WHERE directory = $1",
             &[&directory],
         )?;
-        let results = rows
-            .iter()
-            .map(|row| (row.get(0), row.get(1)))
-            .collect();
+        let results = rows.iter().map(|row| (row.get(0), row.get(1))).collect();
         Ok(results)
     }
 
@@ -233,13 +231,23 @@ impl PgDb {
                 }
                 if score > 0.0 {
                     let similarity = score / query_words.len() as f32;
-                    Some(SearchResult { photo_id: id, path, filename, similarity, description: Some(description) })
+                    Some(SearchResult {
+                        photo_id: id,
+                        path,
+                        filename,
+                        similarity,
+                        description: Some(description),
+                    })
                 } else {
                     None
                 }
             })
             .collect();
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(limit);
         Ok(results)
     }
@@ -327,15 +335,15 @@ impl PgDb {
             &[&path_str.as_ref()],
         )?;
         if row.is_none() {
-            let filename = path.file_name()
+            let filename = path
+                .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let directory = path.parent()
+            let directory = path
+                .parent()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let size_bytes = std::fs::metadata(path)
-                .map(|m| m.len() as i64)
-                .unwrap_or(0);
+            let size_bytes = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
             client.execute(
                 "INSERT INTO photos (path, filename, directory, size_bytes) VALUES ($1, $2, $3, $4)",
                 &[&path_str.as_ref(), &filename.as_str(), &directory.as_str(), &size_bytes],
@@ -370,7 +378,11 @@ impl PgDb {
             &[&name],
         )?;
         match row {
-            Some(row) => Ok(Some(Person { id: row.get(0), name: row.get(1), face_count: row.get(2) })),
+            Some(row) => Ok(Some(Person {
+                id: row.get(0),
+                name: row.get(1),
+                face_count: row.get(2),
+            })),
             None => Ok(None),
         }
     }
@@ -412,7 +424,11 @@ impl PgDb {
         )?;
         let people = rows
             .iter()
-            .map(|row| Person { id: row.get(0), name: row.get(1), face_count: row.get(2) })
+            .map(|row| Person {
+                id: row.get(0),
+                name: row.get(1),
+                face_count: row.get(2),
+            })
             .collect();
         Ok(people)
     }
@@ -430,7 +446,11 @@ impl PgDb {
             &[&person_id],
         )?;
         match row {
-            Some(row) => Ok(Some(Person { id: row.get(0), name: row.get(1), face_count: row.get(2) })),
+            Some(row) => Ok(Some(Person {
+                id: row.get(0),
+                name: row.get(1),
+                face_count: row.get(2),
+            })),
             None => Ok(None),
         }
     }
@@ -476,7 +496,12 @@ impl PgDb {
                 Face {
                     id: row.get(0),
                     photo_id: row.get(1),
-                    bbox: BoundingBox { x: row.get(2), y: row.get(3), width: row.get(4), height: row.get(5) },
+                    bbox: BoundingBox {
+                        x: row.get(2),
+                        y: row.get(3),
+                        width: row.get(4),
+                        height: row.get(5),
+                    },
                     embedding: embedding_bytes.map(|b| face_bytes_to_embedding(&b)),
                     person_id: row.get(7),
                     confidence: confidence_f64.map(|c| c as f32),
@@ -508,7 +533,12 @@ impl PgDb {
                     face: Face {
                         id: row.get(0),
                         photo_id: row.get(1),
-                        bbox: BoundingBox { x: row.get(2), y: row.get(3), width: row.get(4), height: row.get(5) },
+                        bbox: BoundingBox {
+                            x: row.get(2),
+                            y: row.get(3),
+                            width: row.get(4),
+                            height: row.get(5),
+                        },
                         embedding: embedding_bytes.map(|b| face_bytes_to_embedding(&b)),
                         person_id: row.get(7),
                         confidence: confidence_f64.map(|c| c as f32),
@@ -562,7 +592,12 @@ impl PgDb {
                     face: Face {
                         id: row.get(0),
                         photo_id: row.get(1),
-                        bbox: BoundingBox { x: row.get(2), y: row.get(3), width: row.get(4), height: row.get(5) },
+                        bbox: BoundingBox {
+                            x: row.get(2),
+                            y: row.get(3),
+                            width: row.get(4),
+                            height: row.get(5),
+                        },
                         embedding: embedding_bytes.map(|b| face_bytes_to_embedding(&b)),
                         person_id: row.get(7),
                         confidence: confidence_f64.map(|c| c as f32),
@@ -575,7 +610,11 @@ impl PgDb {
         Ok(faces)
     }
 
-    pub fn get_photos_without_faces_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_faces_in_dir(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         let dir_pattern = if directory.ends_with('/') {
             format!("{}%", directory)
         } else {
@@ -654,7 +693,10 @@ impl PgDb {
         Ok(results)
     }
 
-    pub fn get_faces_without_embeddings(&self, limit: usize) -> Result<Vec<(i64, i64, BoundingBox)>> {
+    pub fn get_faces_without_embeddings(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(i64, i64, BoundingBox)>> {
         let limit_i64 = limit as i64;
         let mut client = self.pool.get()?;
         let rows = client.query(
@@ -669,7 +711,16 @@ impl PgDb {
         let results = rows
             .iter()
             .map(|row| {
-                (row.get(0), row.get(1), BoundingBox { x: row.get(2), y: row.get(3), width: row.get(4), height: row.get(5) })
+                (
+                    row.get(0),
+                    row.get(1),
+                    BoundingBox {
+                        x: row.get(2),
+                        y: row.get(3),
+                        width: row.get(4),
+                        height: row.get(5),
+                    },
+                )
             })
             .collect();
         Ok(results)
@@ -677,10 +728,7 @@ impl PgDb {
 
     pub fn get_photo_path(&self, photo_id: i64) -> Result<Option<String>> {
         let mut client = self.pool.get()?;
-        let row = client.query_opt(
-            "SELECT path FROM photos WHERE id = $1",
-            &[&photo_id],
-        )?;
+        let row = client.query_opt("SELECT path FROM photos WHERE id = $1", &[&photo_id])?;
         Ok(row.map(|r| r.get(0)))
     }
 
@@ -697,14 +745,15 @@ impl PgDb {
 
     pub fn count_faces_without_embeddings(&self) -> Result<i64> {
         let mut client = self.pool.get()?;
-        let row = client.query_one(
-            "SELECT COUNT(*) FROM faces WHERE embedding IS NULL",
-            &[],
-        )?;
+        let row = client.query_one("SELECT COUNT(*) FROM faces WHERE embedding IS NULL", &[])?;
         Ok(row.get(0))
     }
 
-    pub fn create_face_cluster(&self, representative_face_id: Option<i64>, auto_name: &str) -> Result<i64> {
+    pub fn create_face_cluster(
+        &self,
+        representative_face_id: Option<i64>,
+        auto_name: &str,
+    ) -> Result<i64> {
         let mut client = self.pool.get()?;
         let row = client.query_one(
             "INSERT INTO face_clusters (representative_face_id, auto_name) VALUES ($1, $2) RETURNING id",
@@ -713,7 +762,12 @@ impl PgDb {
         Ok(row.get(0))
     }
 
-    pub fn add_face_to_cluster(&self, face_id: i64, cluster_id: i64, similarity_score: f32) -> Result<()> {
+    pub fn add_face_to_cluster(
+        &self,
+        face_id: i64,
+        cluster_id: i64,
+        similarity_score: f32,
+    ) -> Result<()> {
         let score_f64 = similarity_score as f64;
         let mut client = self.pool.get()?;
         client.execute(
@@ -741,13 +795,11 @@ impl PgDb {
         )?;
         let clusters = rows
             .iter()
-            .map(|row| {
-                FaceCluster {
-                    id: row.get(0),
-                    auto_name: row.get::<_, Option<String>>(1).unwrap_or_default(),
-                    representative_face_id: row.get(2),
-                    face_count: row.get(3),
-                }
+            .map(|row| FaceCluster {
+                id: row.get(0),
+                auto_name: row.get::<_, Option<String>>(1).unwrap_or_default(),
+                representative_face_id: row.get(2),
+                face_count: row.get(3),
             })
             .collect();
         Ok(clusters)
@@ -781,10 +833,7 @@ impl PgDb {
             "DELETE FROM face_cluster_members WHERE cluster_id = $1",
             &[&cluster_id],
         )?;
-        tx.execute(
-            "DELETE FROM face_clusters WHERE id = $1",
-            &[&cluster_id],
-        )?;
+        tx.execute("DELETE FROM face_clusters WHERE id = $1", &[&cluster_id])?;
         tx.commit()?;
         Ok(person_id)
     }
@@ -801,7 +850,10 @@ impl PgDb {
             "#,
             &[&person_id],
         )?;
-        let results = rows.iter().map(|row| (row.get(0), row.get(1), row.get(2))).collect();
+        let results = rows
+            .iter()
+            .map(|row| (row.get(0), row.get(1), row.get(2)))
+            .collect();
         Ok(results)
     }
 
@@ -809,7 +861,12 @@ impl PgDb {
     // Embedding operations
     // ========================================================================
 
-    pub fn store_embedding(&self, photo_id: i64, embedding: &[f32], model_name: &str) -> Result<()> {
+    pub fn store_embedding(
+        &self,
+        photo_id: i64,
+        embedding: &[f32],
+        model_name: &str,
+    ) -> Result<()> {
         let bytes = embedding_to_bytes(embedding);
         let dim = embedding.len() as i32;
         let mut client = self.pool.get()?;
@@ -863,7 +920,12 @@ impl PgDb {
         Ok(records)
     }
 
-    pub fn semantic_search(&self, query_embedding: &[f32], limit: usize, min_similarity: f32) -> Result<Vec<SearchResult>> {
+    pub fn semantic_search(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_similarity: f32,
+    ) -> Result<Vec<SearchResult>> {
         let embeddings = self.get_all_embeddings()?;
         let mut results: Vec<(i64, f32)> = embeddings
             .iter()
@@ -919,7 +981,11 @@ impl PgDb {
         Ok(results)
     }
 
-    pub fn get_photos_without_embeddings_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_embeddings_in_dir(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         let dir_pattern = if directory.ends_with('/') {
             format!("{}%", directory)
         } else {
@@ -1155,8 +1221,14 @@ impl PgDb {
             return Ok(0);
         }
         let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${}", i)).collect();
-        let sql = format!("DELETE FROM photos WHERE id IN ({})", placeholders.join(", "));
-        let params: Vec<&(dyn postgres::types::ToSql + Sync)> = ids.iter().map(|id| id as &(dyn postgres::types::ToSql + Sync)).collect();
+        let sql = format!(
+            "DELETE FROM photos WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let params: Vec<&(dyn postgres::types::ToSql + Sync)> = ids
+            .iter()
+            .map(|id| id as &(dyn postgres::types::ToSql + Sync))
+            .collect();
         let mut client = self.pool.get()?;
         let count = client.execute(&sql as &str, &params)?;
         Ok(count as usize)
@@ -1174,10 +1246,7 @@ impl PgDb {
 
     pub fn mark_trashed(&self, photo_id: i64, trash_path: &Path) -> Result<()> {
         let mut client = self.pool.get()?;
-        let orig_row = client.query_one(
-            "SELECT path FROM photos WHERE id = $1",
-            &[&photo_id],
-        )?;
+        let orig_row = client.query_one("SELECT path FROM photos WHERE id = $1", &[&photo_id])?;
         let original_path: String = orig_row.get(0);
         let trash_path_str = trash_path.to_string_lossy().to_string();
         let now = chrono::Utc::now().to_rfc3339();
@@ -1190,7 +1259,12 @@ impl PgDb {
                 marked_for_deletion = false
             WHERE id = $4
             "#,
-            &[&trash_path_str.as_str(), &original_path.as_str(), &now.as_str(), &photo_id],
+            &[
+                &trash_path_str.as_str(),
+                &original_path.as_str(),
+                &now.as_str(),
+                &photo_id,
+            ],
         )?;
         Ok(())
     }
@@ -1208,15 +1282,13 @@ impl PgDb {
         )?;
         let photos = rows
             .iter()
-            .map(|row| {
-                TrashedPhoto {
-                    id: row.get(0),
-                    path: row.get(1),
-                    original_path: row.get(2),
-                    filename: row.get(3),
-                    trashed_at: row.get(4),
-                    size_bytes: row.get(5),
-                }
+            .map(|row| TrashedPhoto {
+                id: row.get(0),
+                path: row.get(1),
+                original_path: row.get(2),
+                filename: row.get(3),
+                trashed_at: row.get(4),
+                size_bytes: row.get(5),
             })
             .collect();
         Ok(photos)
@@ -1298,15 +1370,13 @@ impl PgDb {
         )?;
         let photos = rows
             .iter()
-            .map(|row| {
-                TrashedPhoto {
-                    id: row.get(0),
-                    path: row.get(1),
-                    original_path: row.get(2),
-                    filename: row.get(3),
-                    trashed_at: row.get(4),
-                    size_bytes: row.get(5),
-                }
+            .map(|row| TrashedPhoto {
+                id: row.get(0),
+                path: row.get(1),
+                original_path: row.get(2),
+                filename: row.get(3),
+                trashed_at: row.get(4),
+                size_bytes: row.get(5),
             })
             .collect();
         Ok(photos)
@@ -1335,9 +1405,8 @@ impl PgDb {
         hours_start: Option<u8>,
         hours_end: Option<u8>,
     ) -> Result<i64> {
-        let photo_ids_json = photo_ids.map(|ids| {
-            serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string())
-        });
+        let photo_ids_json =
+            photo_ids.map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()));
         let hours_start_i32 = hours_start.map(|v| v as i32);
         let hours_end_i32 = hours_end.map(|v| v as i32);
         let mut client = self.pool.get()?;
@@ -1512,7 +1581,11 @@ impl PgDb {
         let rows = client.query("SELECT id, name, color FROM user_tags ORDER BY name", &[])?;
         let tags = rows
             .iter()
-            .map(|row| UserTag { id: row.get(0), name: row.get(1), color: row.get(2) })
+            .map(|row| UserTag {
+                id: row.get(0),
+                name: row.get(1),
+                color: row.get(2),
+            })
             .collect();
         Ok(tags)
     }
@@ -1534,11 +1607,19 @@ impl PgDb {
             &[&name],
         )?;
         match existing {
-            Some(row) => Ok(UserTag { id: row.get(0), name: row.get(1), color: row.get(2) }),
+            Some(row) => Ok(UserTag {
+                id: row.get(0),
+                name: row.get(1),
+                color: row.get(2),
+            }),
             None => {
                 drop(client);
                 let id = self.create_tag(name, None)?;
-                Ok(UserTag { id, name: name.to_string(), color: "#808080".to_string() })
+                Ok(UserTag {
+                    id,
+                    name: name.to_string(),
+                    color: "#808080".to_string(),
+                })
             }
         }
     }
@@ -1572,7 +1653,11 @@ impl PgDb {
         )?;
         let tags = rows
             .iter()
-            .map(|row| UserTag { id: row.get(0), name: row.get(1), color: row.get(2) })
+            .map(|row| UserTag {
+                id: row.get(0),
+                name: row.get(1),
+                color: row.get(2),
+            })
             .collect();
         Ok(tags)
     }
@@ -1614,7 +1699,11 @@ impl PgDb {
         )?;
         let tags = rows
             .iter()
-            .map(|row| UserTag { id: row.get(0), name: row.get(1), color: row.get(2) })
+            .map(|row| UserTag {
+                id: row.get(0),
+                name: row.get(1),
+                color: row.get(2),
+            })
             .collect();
         Ok(tags)
     }
@@ -1652,7 +1741,12 @@ impl PgDb {
         Ok(albums)
     }
 
-    pub fn create_album(&self, name: &str, description: Option<&str>, is_smart: bool) -> Result<i64> {
+    pub fn create_album(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        is_smart: bool,
+    ) -> Result<i64> {
         let mut client = self.pool.get()?;
         let row = client.query_one(
             "INSERT INTO albums (name, description, is_smart) VALUES ($1, $2, $3) RETURNING id",
@@ -1723,10 +1817,7 @@ impl PgDb {
 
     pub fn get_smart_album_photos(&self, album_id: i64) -> Result<Vec<i64>> {
         let mut client = self.pool.get()?;
-        let row = client.query_one(
-            "SELECT filter_tags FROM albums WHERE id = $1",
-            &[&album_id],
-        )?;
+        let row = client.query_one("SELECT filter_tags FROM albums WHERE id = $1", &[&album_id])?;
         let filter_json: Option<String> = row.get(0);
         let tag_ids: Vec<i64> = filter_json
             .and_then(|j| serde_json::from_str(&j).ok())
@@ -1789,7 +1880,10 @@ impl PgDb {
         Ok(tasks)
     }
 
-    pub fn get_photos_without_description_in_dir(&self, directory: &Path) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_description_in_dir(
+        &self,
+        directory: &Path,
+    ) -> Result<Vec<(i64, String)>> {
         let dir_str = directory.to_string_lossy();
         let pattern = format!("{}%", dir_str);
         let mut client = self.pool.get()?;
@@ -1807,10 +1901,7 @@ impl PgDb {
 
     pub fn get_photo_description(&self, photo_id: i64) -> Result<Option<String>> {
         let mut client = self.pool.get()?;
-        let row = client.query_opt(
-            "SELECT description FROM photos WHERE id = $1",
-            &[&photo_id],
-        )?;
+        let row = client.query_opt("SELECT description FROM photos WHERE id = $1", &[&photo_id])?;
         Ok(row.and_then(|r| r.get(0)))
     }
 
@@ -2027,17 +2118,20 @@ impl PgDb {
             Ok(c) => c,
             Err(_) => return false,
         };
-        let row = client.query_opt(
-            "SELECT 1 FROM photos WHERE path = $1",
-            &[&path],
-        );
+        let row = client.query_opt("SELECT 1 FROM photos WHERE path = $1", &[&path]);
         match row {
             Ok(Some(_)) => true,
             _ => false,
         }
     }
 
-    pub fn insert_basic_photo(&self, path: &str, filename: &str, directory: &str, size: i64) -> Result<()> {
+    pub fn insert_basic_photo(
+        &self,
+        path: &str,
+        filename: &str,
+        directory: &str,
+        size: i64,
+    ) -> Result<()> {
         let mut client = self.pool.get()?;
         client.execute(
             r#"
@@ -2050,7 +2144,11 @@ impl PgDb {
         Ok(())
     }
 
-    pub fn get_photos_without_description_in_directory(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_description_in_directory(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         let limit_i64 = limit as i64;
         let mut client = self.pool.get()?;
         let rows = client.query(

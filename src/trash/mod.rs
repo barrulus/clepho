@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::config::{TrashConfig, DuplicateTrashConfig};
+use crate::config::{DuplicateTrashConfig, TrashConfig};
 
 pub struct TrashManager {
     config: TrashConfig,
@@ -47,8 +47,7 @@ impl TrashManager {
     /// Ensure the trash directory exists
     fn ensure_trash_dir(&self) -> Result<()> {
         if !self.config.path.exists() {
-            fs::create_dir_all(&self.config.path)
-                .context("Failed to create trash directory")?;
+            fs::create_dir_all(&self.config.path).context("Failed to create trash directory")?;
         }
         Ok(())
     }
@@ -61,10 +60,12 @@ impl TrashManager {
 
         let timestamp = Utc::now().timestamp();
         let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let original_name = original.file_stem()
+        let original_name = original
+            .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        let extension = original.extension()
+        let extension = original
+            .extension()
             .map(|s| format!(".{}", s.to_string_lossy()))
             .unwrap_or_default();
 
@@ -83,8 +84,7 @@ impl TrashManager {
             Ok(_) => Ok(trash_path),
             Err(_) => {
                 // Fall back to copy + delete for cross-filesystem moves
-                fs::copy(path, &trash_path)
-                    .context("Failed to copy file to trash")?;
+                fs::copy(path, &trash_path).context("Failed to copy file to trash")?;
                 fs::remove_file(path)
                     .context("Failed to remove original file after copying to trash")?;
                 Ok(trash_path)
@@ -104,7 +104,10 @@ impl TrashManager {
 
         // Check if original path already exists
         if original_path.exists() {
-            anyhow::bail!("Cannot restore: file already exists at {}", original_path.display());
+            anyhow::bail!(
+                "Cannot restore: file already exists at {}",
+                original_path.display()
+            );
         }
 
         // Try rename first
@@ -112,8 +115,7 @@ impl TrashManager {
             Ok(_) => Ok(()),
             Err(_) => {
                 // Fall back to copy + delete
-                fs::copy(trash_path, original_path)
-                    .context("Failed to copy file from trash")?;
+                fs::copy(trash_path, original_path).context("Failed to copy file from trash")?;
                 fs::remove_file(trash_path)
                     .context("Failed to remove file from trash after copying")?;
                 Ok(())
@@ -123,8 +125,7 @@ impl TrashManager {
 
     /// Permanently delete a trashed file
     pub fn delete_permanently(&self, trash_path: &Path) -> Result<()> {
-        fs::remove_file(trash_path)
-            .context("Failed to permanently delete file")?;
+        fs::remove_file(trash_path).context("Failed to permanently delete file")?;
         Ok(())
     }
 
@@ -202,7 +203,8 @@ impl TrashManager {
             let path = entry.path();
             let metadata = entry.metadata()?;
             let size = metadata.len();
-            let modified = metadata.modified()
+            let modified = metadata
+                .modified()
                 .ok()
                 .and_then(|t| DateTime::<Utc>::from(t).into());
 

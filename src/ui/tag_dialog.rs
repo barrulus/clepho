@@ -37,7 +37,12 @@ pub enum TagDialogMode {
 }
 
 impl TagDialog {
-    pub fn new(photo_path: PathBuf, photo_id: i64, current_tags: Vec<UserTag>, all_tags: Vec<UserTag>) -> Self {
+    pub fn new(
+        photo_path: PathBuf,
+        photo_id: i64,
+        current_tags: Vec<UserTag>,
+        all_tags: Vec<UserTag>,
+    ) -> Self {
         Self {
             photo_path,
             photo_id,
@@ -68,7 +73,8 @@ impl TagDialog {
             self.suggestions = self.all_tags.clone();
         } else {
             let lower = self.input.to_lowercase();
-            self.suggestions = self.all_tags
+            self.suggestions = self
+                .all_tags
                 .iter()
                 .filter(|t| t.name.to_lowercase().contains(&lower))
                 .cloned()
@@ -139,9 +145,14 @@ pub fn render(frame: &mut Frame, dialog: &TagDialog, area: Rect) {
     frame.render_widget(Clear, dialog_area);
 
     // Outer block
-    let title = format!(" Tags: {} ", dialog.photo_path.file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default());
+    let title = format!(
+        " Tags: {} ",
+        dialog
+            .photo_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default()
+    );
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
@@ -159,9 +170,9 @@ pub fn render(frame: &mut Frame, dialog: &TagDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Input / mode indicator
-            Constraint::Min(8),     // Tag list
-            Constraint::Length(2),  // Help
+            Constraint::Length(3), // Input / mode indicator
+            Constraint::Min(8),    // Tag list
+            Constraint::Length(2), // Help
         ])
         .split(inner);
 
@@ -180,16 +191,23 @@ fn render_view_mode(frame: &mut Frame, dialog: &TagDialog, chunks: std::rc::Rc<[
     // Current tags list
     if dialog.current_tags.is_empty() {
         let empty = Paragraph::new("No tags assigned")
-            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+            .style(
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )
             .block(Block::default().borders(Borders::ALL).title(" Tags "));
         frame.render_widget(empty, chunks[1]);
     } else {
-        let items: Vec<ListItem> = dialog.current_tags
+        let items: Vec<ListItem> = dialog
+            .current_tags
             .iter()
             .enumerate()
             .map(|(i, tag)| {
                 let style = if i == dialog.selected_index {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -221,13 +239,22 @@ fn render_add_mode(frame: &mut Frame, dialog: &TagDialog, chunks: std::rc::Rc<[R
         &dialog.input
     };
     let input_style = if dialog.input.is_empty() {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC)
     } else {
         Style::default().fg(Color::White)
     };
-    let input = Paragraph::new(format!("> {}_", if dialog.input.is_empty() { "" } else { &dialog.input }))
-        .style(input_style)
-        .block(Block::default().borders(Borders::ALL).title(" Add Tag "));
+    let input = Paragraph::new(format!(
+        "> {}_",
+        if dialog.input.is_empty() {
+            ""
+        } else {
+            &dialog.input
+        }
+    ))
+    .style(input_style)
+    .block(Block::default().borders(Borders::ALL).title(" Add Tag "));
     frame.render_widget(input, chunks[0]);
 
     // Suggestions list
@@ -235,15 +262,22 @@ fn render_add_mode(frame: &mut Frame, dialog: &TagDialog, chunks: std::rc::Rc<[R
         let create_msg = format!("Press Enter to create tag: \"{}\"", dialog.input);
         let msg = Paragraph::new(create_msg)
             .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title(" Suggestions "));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Suggestions "),
+            );
         frame.render_widget(msg, chunks[1]);
     } else {
-        let items: Vec<ListItem> = dialog.suggestions
+        let items: Vec<ListItem> = dialog
+            .suggestions
             .iter()
             .enumerate()
             .map(|(i, tag)| {
                 let style = if i == dialog.selected_index {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -252,7 +286,11 @@ fn render_add_mode(frame: &mut Frame, dialog: &TagDialog, chunks: std::rc::Rc<[R
             .collect();
 
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Suggestions "))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Suggestions "),
+            )
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
         let mut state = ListState::default();

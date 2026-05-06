@@ -67,8 +67,8 @@ impl Stage for ExifStage {
                 exif::Tag::GPSLongitudeRef,
                 ['E', 'W'],
             );
-            gps_alt = field_string(&reader, exif::Tag::GPSAltitude)
-                .and_then(|s| s.parse::<f64>().ok());
+            gps_alt =
+                field_string(&reader, exif::Tag::GPSAltitude).and_then(|s| s.parse::<f64>().ok());
             camera_make = field_string(&reader, exif::Tag::Make);
             camera_model = field_string(&reader, exif::Tag::Model);
             camera_lens = field_string(&reader, exif::Tag::LensModel)

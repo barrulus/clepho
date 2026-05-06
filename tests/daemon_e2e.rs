@@ -88,15 +88,7 @@ fn daemon_pipeline_walks_photo_to_index_done() {
             "SELECT scan_done_at, exif_done_at, thumb_done_at, llm_done_at, index_done_at
              FROM photos WHERE path LIKE '%a.jpg'",
             [],
-            |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                ))
-            },
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .unwrap();
     assert!(

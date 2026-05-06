@@ -1,8 +1,8 @@
+use image::{imageops::FilterType, DynamicImage};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
-use image::{DynamicImage, imageops::FilterType};
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol, Resize, StatefulImage};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -178,7 +178,12 @@ impl ImagePreviewState {
 
     /// Load an image for the given path asynchronously, returns cached if available
     /// rotation_degrees: 0, 90, 180, or 270 degrees clockwise
-    pub fn load_image(&mut self, path: &PathBuf, thumbnail_size: u32, rotation_degrees: i32) -> Option<&mut StatefulProtocol> {
+    pub fn load_image(
+        &mut self,
+        path: &PathBuf,
+        thumbnail_size: u32,
+        rotation_degrees: i32,
+    ) -> Option<&mut StatefulProtocol> {
         // Poll for any completed loads first
         self.poll_async_loads();
 
@@ -207,7 +212,10 @@ impl ImagePreviewState {
                 // Cached thumbnails are 256px, but preview needs 1024px for quality
                 // Rotation is applied here since we're loading from original
                 let load_result = image::ImageReader::open(&path_clone)
-                    .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+                    .and_then(|r| {
+                        r.decode()
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    })
                     .map(|img| {
                         let resized = img.resize(size, size, FilterType::Triangle);
                         // Apply rotation
@@ -268,9 +276,10 @@ impl ImagePreviewState {
             let bbox_h = bbox.height;
 
             std::thread::spawn(move || {
-                if let Ok(dyn_img) = image::ImageReader::open(&path_clone)
-                    .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                {
+                if let Ok(dyn_img) = image::ImageReader::open(&path_clone).and_then(|r| {
+                    r.decode()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                }) {
                     // Calculate crop region with padding (20% extra on each side)
                     let img_width = dyn_img.width() as i32;
                     let img_height = dyn_img.height() as i32;
@@ -292,11 +301,12 @@ impl ImagePreviewState {
 
                     // Only downscale if crop is larger than target, never upscale
                     // (upscaling small face crops makes them blurry)
-                    let final_image = if cropped.width() > thumbnail_size || cropped.height() > thumbnail_size {
-                        cropped.resize(thumbnail_size, thumbnail_size, FilterType::Lanczos3)
-                    } else {
-                        cropped
-                    };
+                    let final_image =
+                        if cropped.width() > thumbnail_size || cropped.height() > thumbnail_size {
+                            cropped.resize(thumbnail_size, thumbnail_size, FilterType::Lanczos3)
+                        } else {
+                            cropped
+                        };
                     let _ = sender.send((cache_key, final_image));
                 }
             });
@@ -370,7 +380,9 @@ fn render_directory_preview(frame: &mut Frame, path: &std::path::Path, block: Bl
                 ListItem::new(format!("{}{}", icon, name)).style(style)
             })
             .collect(),
-        Err(_) => vec![ListItem::new("Cannot read directory").style(Style::default().fg(Color::Red))],
+        Err(_) => {
+            vec![ListItem::new("Cannot read directory").style(Style::default().fg(Color::Red))]
+        }
     };
 
     let list = List::new(entries).block(block);
@@ -394,7 +406,10 @@ fn render_image_preview(
 
     if show_image {
         // Adaptive split: smaller image when we have description content
-        let has_description = metadata.as_ref().map(|m| m.description.is_some()).unwrap_or(false);
+        let has_description = metadata
+            .as_ref()
+            .map(|m| m.description.is_some())
+            .unwrap_or(false);
         let image_percent = if has_description { 45 } else { 60 };
 
         let chunks = Layout::default()
@@ -409,13 +424,20 @@ fn render_image_preview(
         let thumbnail_size = app.config.preview.thumbnail_size;
         // Get rotation from database (cached to avoid per-frame DB queries)
         let rotation = app.get_photo_rotation(&entry.path);
-        if let Some(protocol) = app.image_preview.load_image(&entry.path, thumbnail_size, rotation) {
+        if let Some(protocol) = app
+            .image_preview
+            .load_image(&entry.path, thumbnail_size, rotation)
+        {
             let image = StatefulImage::new(None).resize(Resize::Fit(None));
             frame.render_stateful_widget(image, chunks[0], protocol);
         } else if app.image_preview.is_loading_image(&entry.path) {
             // Show loading indicator while image loads
             let loading = Paragraph::new("Loading image...")
-                .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+                .style(
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )
                 .alignment(Alignment::Center);
             frame.render_widget(loading, chunks[0]);
         }
@@ -464,13 +486,10 @@ fn render_image_metadata(
         }
 
         // Camera info
-        let camera_info: Vec<&str> = [
-            meta.camera_make.as_deref(),
-            meta.camera_model.as_deref(),
-        ]
-        .iter()
-        .filter_map(|s| *s)
-        .collect();
+        let camera_info: Vec<&str> = [meta.camera_make.as_deref(), meta.camera_model.as_deref()]
+            .iter()
+            .filter_map(|s| *s)
+            .collect();
         if !camera_info.is_empty() {
             info_lines.push(Line::from(vec![
                 Span::styled("Camera: ", Style::default().fg(Color::DarkGray)),
@@ -526,7 +545,11 @@ fn render_image_metadata(
         // Faces and people
         if meta.face_count > 0 {
             let face_text = if meta.people_names.is_empty() {
-                format!("{} face{}", meta.face_count, if meta.face_count == 1 { "" } else { "s" })
+                format!(
+                    "{} face{}",
+                    meta.face_count,
+                    if meta.face_count == 1 { "" } else { "s" }
+                )
             } else {
                 format!("{} ({})", meta.face_count, meta.people_names.join(", "))
             };
@@ -549,7 +572,9 @@ fn render_image_metadata(
             info_lines.push(Line::from(""));
             info_lines.push(Line::from(Span::styled(
                 "AI Description:",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             )));
             for line in description.lines() {
                 info_lines.push(Line::from(line.to_string()));
@@ -559,18 +584,27 @@ fn render_image_metadata(
         // Not in database
         info_lines.push(Line::from(Span::styled(
             "Not scanned yet",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::ITALIC),
         )));
     }
 
     // Hint for actions
     info_lines.push(Line::from(""));
-    let hint = if metadata.as_ref().map(|m| m.description.is_some()).unwrap_or(false) {
+    let hint = if metadata
+        .as_ref()
+        .map(|m| m.description.is_some())
+        .unwrap_or(false)
+    {
         "[i] regenerate | [{ }] scroll"
     } else {
         "[i] describe with AI | [s] scan"
     };
-    info_lines.push(Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))));
+    info_lines.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::DarkGray),
+    )));
 
     let text = Text::from(info_lines);
     let paragraph = Paragraph::new(text)

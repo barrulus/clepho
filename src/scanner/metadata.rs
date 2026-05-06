@@ -144,17 +144,35 @@ pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
         if let Ok(exif) = exif::Reader::new().read_from_container(&mut bufreader) {
             // Camera make
             if let Some(field) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
-                metadata.camera_make = Some(field.display_value().to_string().trim_matches('"').to_string());
+                metadata.camera_make = Some(
+                    field
+                        .display_value()
+                        .to_string()
+                        .trim_matches('"')
+                        .to_string(),
+                );
             }
 
             // Camera model
             if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
-                metadata.camera_model = Some(field.display_value().to_string().trim_matches('"').to_string());
+                metadata.camera_model = Some(
+                    field
+                        .display_value()
+                        .to_string()
+                        .trim_matches('"')
+                        .to_string(),
+                );
             }
 
             // Lens model
             if let Some(field) = exif.get_field(exif::Tag::LensModel, exif::In::PRIMARY) {
-                metadata.lens = Some(field.display_value().to_string().trim_matches('"').to_string());
+                metadata.lens = Some(
+                    field
+                        .display_value()
+                        .to_string()
+                        .trim_matches('"')
+                        .to_string(),
+                );
             }
 
             // Focal length
@@ -181,7 +199,9 @@ pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
             }
 
             // ISO
-            if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
+            if let Some(field) =
+                exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY)
+            {
                 if let exif::Value::Short(ref v) = field.value {
                     if let Some(&iso) = v.first() {
                         metadata.iso = Some(iso as i32);
@@ -191,7 +211,13 @@ pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
 
             // Date taken
             if let Some(field) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
-                metadata.taken_at = Some(field.display_value().to_string().trim_matches('"').to_string());
+                metadata.taken_at = Some(
+                    field
+                        .display_value()
+                        .to_string()
+                        .trim_matches('"')
+                        .to_string(),
+                );
             }
 
             // Orientation
@@ -228,8 +254,10 @@ pub fn extract_metadata(path: &PathBuf) -> Result<ImageMetadata> {
                         let lat_ref_str = lat_ref.display_value().to_string();
                         let lon_ref_str = lon_ref.display_value().to_string();
 
-                        metadata.gps_latitude = Some(if lat_ref_str.contains('S') { -lat } else { lat });
-                        metadata.gps_longitude = Some(if lon_ref_str.contains('W') { -lon } else { lon });
+                        metadata.gps_latitude =
+                            Some(if lat_ref_str.contains('S') { -lat } else { lat });
+                        metadata.gps_longitude =
+                            Some(if lon_ref_str.contains('W') { -lon } else { lon });
                     }
                 }
             }
@@ -272,7 +300,8 @@ fn serialize_exif_value(value: &exif::Value) -> serde_json::Value {
     match value {
         Value::Byte(v) => json!(v),
         Value::Ascii(v) => {
-            let strings: Vec<String> = v.iter()
+            let strings: Vec<String> = v
+                .iter()
                 .map(|b| String::from_utf8_lossy(b).to_string())
                 .collect();
             if strings.len() == 1 {
@@ -309,7 +338,10 @@ fn serialize_exif_value(value: &exif::Value) -> serde_json::Value {
             if v.len() > 1024 {
                 json!({"type": "binary", "size": v.len()})
             } else {
-                json!(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v))
+                json!(base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    v
+                ))
             }
         }
         Value::SShort(v) => {

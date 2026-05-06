@@ -1,5 +1,3 @@
-mod schema;
-pub mod schema_v2;
 pub mod albums;
 pub mod clock;
 pub mod embeddings;
@@ -10,34 +8,36 @@ pub mod migrate;
 pub mod pipeline_events;
 pub mod provenance;
 pub mod schedule;
+mod schema;
+pub mod schema_v2;
 pub mod similarity;
 pub mod sqlite;
 pub mod trash;
 
 #[cfg(feature = "postgres")]
+pub mod migrate_postgres;
+#[cfg(feature = "postgres")]
 pub mod postgres;
 #[cfg(feature = "postgres")]
 pub mod postgres_schema;
-#[cfg(feature = "postgres")]
-pub mod migrate_postgres;
 
 use anyhow::Result;
 use std::path::Path;
 
-pub use schema::{SCHEMA, MIGRATIONS};
-pub use clock::{Clock, SystemClock, FixedClock};
-pub use similarity::{PhotoRecord, SimilarityGroup, calculate_quality_score};
+pub use albums::UserTag;
+pub use clock::{Clock, FixedClock, SystemClock};
 pub use embeddings::SearchResult;
 pub use faces::{BoundingBox, Face, FaceCluster, FaceWithPhoto, Person};
-pub use schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
-pub use albums::UserTag;
 #[allow(unused_imports)]
 pub use migrate::{apply_v2_schema, detect_schema_state, reset_to_v2, SchemaState};
 #[allow(unused_imports)]
 pub use provenance::{
-    pipeline_write_facet, user_add_facet, user_confirm_facet, user_reject_facet,
-    user_remove_facet, Actor, FacetTable, WriteOutcome,
+    pipeline_write_facet, user_add_facet, user_confirm_facet, user_reject_facet, user_remove_facet,
+    Actor, FacetTable, WriteOutcome,
 };
+pub use schedule::{ScheduleStatus, ScheduledTask, ScheduledTaskType};
+pub use schema::{MIGRATIONS, SCHEMA};
+pub use similarity::{calculate_quality_score, PhotoRecord, SimilarityGroup};
 
 use crate::config::DatabaseConfig;
 #[cfg(feature = "postgres")]
@@ -46,10 +46,10 @@ use crate::config::DatabaseType;
 /// Convert EXIF orientation value (1-8) to rotation degrees (0, 90, 180, 270)
 fn exif_orientation_to_degrees(orientation: i32) -> i32 {
     match orientation {
-        6 => 90,   // Rotate 90 CW
-        3 => 180,  // Rotate 180
-        8 => 270,  // Rotate 90 CCW
-        _ => 0,    // Normal (1) or other values
+        6 => 90,  // Rotate 90 CW
+        3 => 180, // Rotate 180
+        8 => 270, // Rotate 90 CCW
+        _ => 0,   // Normal (1) or other values
     }
 }
 
@@ -165,16 +165,22 @@ impl Database {
         #[cfg(feature = "postgres")]
         {
             if config.backend == DatabaseType::Postgresql {
-                let url = config.postgresql_url.as_deref()
+                let url = config
+                    .postgresql_url
+                    .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("PostgreSQL URL not configured"))?;
                 let pool_size = config.pool_size.unwrap_or(10);
                 let pg = postgres::PgDb::open(url, pool_size)?;
-                return Ok(Self { inner: DatabaseInner::Postgres(pg) });
+                return Ok(Self {
+                    inner: DatabaseInner::Postgres(pg),
+                });
             }
         }
 
         let db = sqlite::SqliteDb::open(&config.sqlite_path)?;
-        Ok(Self { inner: DatabaseInner::Sqlite(db) })
+        Ok(Self {
+            inner: DatabaseInner::Sqlite(db),
+        })
     }
 
     pub fn initialize(&self) -> Result<()> {
@@ -209,7 +215,10 @@ impl Database {
         dispatch!(self, update_photo_path(old_path, new_path))
     }
 
-    pub fn get_photos_mtime_in_dir(&self, directory: &str) -> Result<Vec<(String, Option<String>)>> {
+    pub fn get_photos_mtime_in_dir(
+        &self,
+        directory: &str,
+    ) -> Result<Vec<(String, Option<String>)>> {
         dispatch!(self, get_photos_mtime_in_dir(directory))
     }
 
@@ -305,7 +314,11 @@ impl Database {
         dispatch!(self, get_unassigned_faces())
     }
 
-    pub fn get_photos_without_faces_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_faces_in_dir(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         dispatch!(self, get_photos_without_faces_in_dir(directory, limit))
     }
 
@@ -329,7 +342,10 @@ impl Database {
         dispatch!(self, get_all_face_embeddings())
     }
 
-    pub fn get_faces_without_embeddings(&self, limit: usize) -> Result<Vec<(i64, i64, BoundingBox)>> {
+    pub fn get_faces_without_embeddings(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(i64, i64, BoundingBox)>> {
         dispatch!(self, get_faces_without_embeddings(limit))
     }
 
@@ -345,12 +361,24 @@ impl Database {
         dispatch!(self, count_faces_without_embeddings())
     }
 
-    pub fn create_face_cluster(&self, representative_face_id: Option<i64>, auto_name: &str) -> Result<i64> {
+    pub fn create_face_cluster(
+        &self,
+        representative_face_id: Option<i64>,
+        auto_name: &str,
+    ) -> Result<i64> {
         dispatch!(self, create_face_cluster(representative_face_id, auto_name))
     }
 
-    pub fn add_face_to_cluster(&self, face_id: i64, cluster_id: i64, similarity_score: f32) -> Result<()> {
-        dispatch!(self, add_face_to_cluster(face_id, cluster_id, similarity_score))
+    pub fn add_face_to_cluster(
+        &self,
+        face_id: i64,
+        cluster_id: i64,
+        similarity_score: f32,
+    ) -> Result<()> {
+        dispatch!(
+            self,
+            add_face_to_cluster(face_id, cluster_id, similarity_score)
+        )
     }
 
     pub fn get_all_face_clusters(&self) -> Result<Vec<FaceCluster>> {
@@ -373,7 +401,12 @@ impl Database {
     // Embedding operations
     // ========================================================================
 
-    pub fn store_embedding(&self, photo_id: i64, embedding: &[f32], model_name: &str) -> Result<()> {
+    pub fn store_embedding(
+        &self,
+        photo_id: i64,
+        embedding: &[f32],
+        model_name: &str,
+    ) -> Result<()> {
         dispatch!(self, store_embedding(photo_id, embedding, model_name))
     }
 
@@ -386,8 +419,16 @@ impl Database {
         dispatch!(self, get_all_embeddings())
     }
 
-    pub fn semantic_search(&self, query_embedding: &[f32], limit: usize, min_similarity: f32) -> Result<Vec<SearchResult>> {
-        dispatch!(self, semantic_search(query_embedding, limit, min_similarity))
+    pub fn semantic_search(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_similarity: f32,
+    ) -> Result<Vec<SearchResult>> {
+        dispatch!(
+            self,
+            semantic_search(query_embedding, limit, min_similarity)
+        )
     }
 
     #[allow(dead_code)]
@@ -395,7 +436,11 @@ impl Database {
         dispatch!(self, get_photos_without_embeddings(limit))
     }
 
-    pub fn get_photos_without_embeddings_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_embeddings_in_dir(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         dispatch!(self, get_photos_without_embeddings_in_dir(directory, limit))
     }
 
@@ -486,7 +531,17 @@ impl Database {
         hours_start: Option<u8>,
         hours_end: Option<u8>,
     ) -> Result<i64> {
-        dispatch!(self, create_scheduled_task(task_type, target_path, photo_ids, scheduled_at, hours_start, hours_end))
+        dispatch!(
+            self,
+            create_scheduled_task(
+                task_type,
+                target_path,
+                photo_ids,
+                scheduled_at,
+                hours_start,
+                hours_end
+            )
+        )
     }
 
     pub fn get_pending_schedules(&self) -> Result<Vec<ScheduledTask>> {
@@ -502,7 +557,12 @@ impl Database {
         dispatch!(self, get_all_schedules())
     }
 
-    pub fn update_schedule_status(&self, id: i64, status: ScheduleStatus, error_message: Option<&str>) -> Result<()> {
+    pub fn update_schedule_status(
+        &self,
+        id: i64,
+        status: ScheduleStatus,
+        error_message: Option<&str>,
+    ) -> Result<()> {
         dispatch!(self, update_schedule_status(id, status, error_message))
     }
 
@@ -580,7 +640,12 @@ impl Database {
         dispatch!(self, get_all_albums())
     }
 
-    pub fn create_album(&self, name: &str, description: Option<&str>, is_smart: bool) -> Result<i64> {
+    pub fn create_album(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        is_smart: bool,
+    ) -> Result<i64> {
         dispatch!(self, create_album(name, description, is_smart))
     }
 
@@ -625,7 +690,10 @@ impl Database {
         dispatch!(self, get_photos_without_description())
     }
 
-    pub fn get_photos_without_description_in_dir(&self, directory: &Path) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_description_in_dir(
+        &self,
+        directory: &Path,
+    ) -> Result<Vec<(i64, String)>> {
         dispatch!(self, get_photos_without_description_in_dir(directory))
     }
 
@@ -679,14 +747,34 @@ impl Database {
         perceptual_hash: Option<&str>,
         exif_orientation: i32,
     ) -> Result<()> {
-        dispatch!(self, insert_scanned_photo(
-            path, filename, directory, size_bytes, modified_at,
-            width, height, format,
-            camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at,
-            gps_lat, gps_lon, all_exif,
-            md5_hash, sha256_hash, perceptual_hash,
-            exif_orientation
-        ))
+        dispatch!(
+            self,
+            insert_scanned_photo(
+                path,
+                filename,
+                directory,
+                size_bytes,
+                modified_at,
+                width,
+                height,
+                format,
+                camera_make,
+                camera_model,
+                lens,
+                focal_length,
+                aperture,
+                shutter_speed,
+                iso,
+                taken_at,
+                gps_lat,
+                gps_lon,
+                all_exif,
+                md5_hash,
+                sha256_hash,
+                perceptual_hash,
+                exif_orientation
+            )
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -716,14 +804,34 @@ impl Database {
         perceptual_hash: Option<&str>,
         exif_orientation: i32,
     ) -> Result<()> {
-        dispatch!(self, update_scanned_photo(
-            path, filename, directory, size_bytes, modified_at,
-            width, height, format,
-            camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at,
-            gps_lat, gps_lon, all_exif,
-            md5_hash, sha256_hash, perceptual_hash,
-            exif_orientation
-        ))
+        dispatch!(
+            self,
+            update_scanned_photo(
+                path,
+                filename,
+                directory,
+                size_bytes,
+                modified_at,
+                width,
+                height,
+                format,
+                camera_make,
+                camera_model,
+                lens,
+                focal_length,
+                aperture,
+                shutter_speed,
+                iso,
+                taken_at,
+                gps_lat,
+                gps_lon,
+                all_exif,
+                md5_hash,
+                sha256_hash,
+                perceptual_hash,
+                exif_orientation
+            )
+        )
     }
 
     // ========================================================================
@@ -746,12 +854,25 @@ impl Database {
         }
     }
 
-    pub fn insert_basic_photo(&self, path: &str, filename: &str, directory: &str, size: i64) -> Result<()> {
+    pub fn insert_basic_photo(
+        &self,
+        path: &str,
+        filename: &str,
+        directory: &str,
+        size: i64,
+    ) -> Result<()> {
         dispatch!(self, insert_basic_photo(path, filename, directory, size))
     }
 
-    pub fn get_photos_without_description_in_directory(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
-        dispatch!(self, get_photos_without_description_in_directory(directory, limit))
+    pub fn get_photos_without_description_in_directory(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
+        dispatch!(
+            self,
+            get_photos_without_description_in_directory(directory, limit)
+        )
     }
 
     pub fn save_photo_description_by_id(&self, photo_id: i64, description: &str) -> Result<()> {

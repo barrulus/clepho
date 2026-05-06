@@ -8,8 +8,6 @@ pub mod edit_dialog;
 pub mod export_dialog;
 pub mod gallery;
 pub mod move_dialog;
-pub mod tag_dialog;
-pub mod slideshow;
 pub mod overdue_dialog;
 pub mod people_dialog;
 pub mod pipeline_status;
@@ -20,7 +18,9 @@ pub mod reset_db_dialog;
 pub mod schedule_dialog;
 pub mod search_dialog;
 pub mod settings_dialog;
+pub mod slideshow;
 mod status_bar;
+pub mod tag_dialog;
 mod task_list_dialog;
 pub mod trash_dialog;
 

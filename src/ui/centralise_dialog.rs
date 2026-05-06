@@ -2,7 +2,10 @@
 
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState,
+    },
 };
 use std::path::PathBuf;
 
@@ -44,7 +47,11 @@ pub enum CentraliseDialogMode {
 }
 
 impl CentraliseDialog {
-    pub fn new(library_path: PathBuf, operation: CentraliseOperation, source_files: Vec<PathBuf>) -> Self {
+    pub fn new(
+        library_path: PathBuf,
+        operation: CentraliseOperation,
+        source_files: Vec<PathBuf>,
+    ) -> Self {
         Self {
             library_path,
             operation,
@@ -68,7 +75,9 @@ impl CentraliseDialog {
 
     /// Move selection down in the preview list
     pub fn move_down(&mut self) {
-        let max_idx = self.preview.as_ref()
+        let max_idx = self
+            .preview
+            .as_ref()
             .map(|p| p.operations.len() + p.skipped.len())
             .unwrap_or(0);
         if self.selected_index < max_idx.saturating_sub(1) {
@@ -85,7 +94,9 @@ impl CentraliseDialog {
 
     /// Page down in the list
     pub fn page_down(&mut self, visible_rows: usize) {
-        let max_idx = self.preview.as_ref()
+        let max_idx = self
+            .preview
+            .as_ref()
             .map(|p| p.operations.len() + p.skipped.len())
             .unwrap_or(0);
         self.selected_index = (self.selected_index + visible_rows).min(max_idx.saturating_sub(1));
@@ -140,26 +151,29 @@ fn render_configure(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Library path
-            Constraint::Length(3),  // Operation mode
-            Constraint::Length(3),  // File count
-            Constraint::Min(4),     // Spacer
-            Constraint::Length(2),  // Error
-            Constraint::Length(2),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Library path
+            Constraint::Length(3), // Operation mode
+            Constraint::Length(3), // File count
+            Constraint::Min(4),    // Spacer
+            Constraint::Length(2), // Error
+            Constraint::Length(2), // Help
         ])
         .split(inner);
 
     // Title
     let title = Paragraph::new("Organize photos into a managed library")
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center);
     frame.render_widget(title, chunks[0]);
 
     // Library path
     let lib_text = format!("Library: {}", dialog.library_path.display());
-    let lib_para = Paragraph::new(lib_text)
-        .style(Style::default().fg(Color::Yellow));
+    let lib_para = Paragraph::new(lib_text).style(Style::default().fg(Color::Yellow));
     frame.render_widget(lib_para, chunks[1]);
 
     // Operation mode
@@ -167,20 +181,18 @@ fn render_configure(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
         CentraliseOperation::Copy => "[C] Operation: COPY (keeps originals)",
         CentraliseOperation::Move => "[C] Operation: MOVE (removes originals)",
     };
-    let op_para = Paragraph::new(op_text)
-        .style(Style::default().fg(Color::Cyan));
+    let op_para = Paragraph::new(op_text).style(Style::default().fg(Color::Cyan));
     frame.render_widget(op_para, chunks[2]);
 
     // File count
     let count_text = format!("Files to process: {}", dialog.source_files.len());
-    let count_para = Paragraph::new(count_text)
-        .style(Style::default().fg(Color::White));
+    let count_para = Paragraph::new(count_text).style(Style::default().fg(Color::White));
     frame.render_widget(count_para, chunks[3]);
 
     // Error message
     if let Some(ref err) = dialog.error {
-        let err_para = Paragraph::new(format!("Error: {}", err))
-            .style(Style::default().fg(Color::Red));
+        let err_para =
+            Paragraph::new(format!("Error: {}", err)).style(Style::default().fg(Color::Red));
         frame.render_widget(err_para, chunks[5]);
     }
 
@@ -208,10 +220,10 @@ fn render_preview(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),  // Summary
-            Constraint::Min(10),    // File list
-            Constraint::Length(3),  // Selected item detail
-            Constraint::Length(2),  // Help
+            Constraint::Length(2), // Summary
+            Constraint::Min(10),   // File list
+            Constraint::Length(3), // Selected item detail
+            Constraint::Length(2), // Help
         ])
         .split(inner);
 
@@ -228,8 +240,7 @@ fn render_preview(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
             preview.total_bytes as f64 / (1024.0 * 1024.0),
             preview.skipped.len()
         );
-        let summary_para = Paragraph::new(summary)
-            .style(Style::default().fg(Color::Yellow));
+        let summary_para = Paragraph::new(summary).style(Style::default().fg(Color::Yellow));
         frame.render_widget(summary_para, chunks[0]);
 
         // File list
@@ -241,15 +252,21 @@ fn render_preview(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
         // Operations
         for (i, op) in preview.operations.iter().enumerate() {
             let style = if i == dialog.selected_index {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Green)
             };
 
-            let src_name = op.source.file_name()
+            let src_name = op
+                .source
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let dest_name = op.destination.file_name()
+            let dest_name = op
+                .destination
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
 
@@ -261,20 +278,22 @@ fn render_preview(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
         for (i, (path, reason)) in preview.skipped.iter().enumerate() {
             let idx = preview.operations.len() + i;
             let style = if idx == dialog.selected_index {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
 
-            let name = path.file_name()
+            let name = path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
             let text = format!("  [SKIP] {} - {}", name, reason);
             items.push(ListItem::new(text).style(style));
         }
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Files "));
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" Files "));
 
         let mut state = ListState::default();
         state.select(Some(dialog.selected_index));
@@ -286,11 +305,14 @@ fn render_preview(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
                 .end_symbol(Some("▼"));
-            let mut scrollbar_state = ScrollbarState::new(total_items)
-                .position(dialog.selected_index);
+            let mut scrollbar_state =
+                ScrollbarState::new(total_items).position(dialog.selected_index);
             frame.render_stateful_widget(
                 scrollbar,
-                chunks[1].inner(Margin { vertical: 1, horizontal: 0 }),
+                chunks[1].inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
                 &mut scrollbar_state,
             );
         }
@@ -353,9 +375,9 @@ fn render_results(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),  // Summary
-            Constraint::Min(8),     // Details
-            Constraint::Length(2),  // Help
+            Constraint::Length(4), // Summary
+            Constraint::Min(8),    // Details
+            Constraint::Length(2), // Help
         ])
         .split(inner);
 
@@ -386,7 +408,8 @@ fn render_results(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )));
             for (path, err) in &result.failed {
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 lines.push(Line::from(Span::styled(
@@ -403,7 +426,9 @@ fn render_results(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
                 Style::default().fg(Color::Green),
             )));
             for op in &result.succeeded {
-                let name = op.destination.file_name()
+                let name = op
+                    .destination
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 lines.push(Line::from(Span::styled(
@@ -413,8 +438,7 @@ fn render_results(frame: &mut Frame, dialog: &CentraliseDialog, area: Rect) {
             }
         }
 
-        let details = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::TOP));
+        let details = Paragraph::new(lines).block(Block::default().borders(Borders::TOP));
         frame.render_widget(details, chunks[1]);
     }
 

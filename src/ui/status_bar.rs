@@ -1,19 +1,14 @@
-use ratatui::{
-    prelude::*,
-    widgets::Paragraph,
-};
+use ratatui::{prelude::*, widgets::Paragraph};
 
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     // If there's a status message, show it prominently
     if let Some(ref message) = app.status_message {
-        let line = Line::from(vec![
-            Span::styled(
-                format!(" {} ", message),
-                Style::default().fg(Color::Yellow).bg(Color::DarkGray),
-            ),
-        ]);
+        let line = Line::from(vec![Span::styled(
+            format!(" {} ", message),
+            Style::default().fg(Color::Yellow).bg(Color::DarkGray),
+        )]);
         let paragraph = Paragraph::new(line);
         frame.render_widget(paragraph, area);
         return;
@@ -101,7 +96,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     // Calculate remaining space and add spacing
     let content_len: usize = spans.iter().map(|s| s.content.len()).sum();
-    let has_changes = app.detected_changes.as_ref().map_or(false, |c| c.has_changes());
+    let has_changes = app
+        .detected_changes
+        .as_ref()
+        .map_or(false, |c| c.has_changes());
     let help_text = if running_tasks.is_empty() {
         if has_changes {
             format!(" {} | s:scan c:changes ?:help q:quit ", position)

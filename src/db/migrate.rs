@@ -10,10 +10,10 @@ pub const CURRENT_GENERATION: i64 = 2;
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaState {
-    Empty,           // brand-new DB, no tables yet
-    Legacy,          // has tables but no 'schema_version' or version < 2
-    Current,         // version = CURRENT_GENERATION
-    Newer(i64),      // version > CURRENT_GENERATION (downgrade case)
+    Empty,      // brand-new DB, no tables yet
+    Legacy,     // has tables but no 'schema_version' or version < 2
+    Current,    // version = CURRENT_GENERATION
+    Newer(i64), // version > CURRENT_GENERATION (downgrade case)
 }
 
 #[allow(dead_code)]

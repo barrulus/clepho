@@ -2,12 +2,8 @@
 //! `process_one` returning Ok and `mark_done` writing must look exactly like
 //! "not yet processed" on next start, so the scheduler picks it up again.
 
-use clepho::db::{
-    apply_v2_schema, pipeline_write_facet, FacetTable, FixedClock,
-};
-use clepho::pipeline::stages::{
-    exif::ExifStage, mark_done, mark_error, Stage, StageId,
-};
+use clepho::db::{apply_v2_schema, pipeline_write_facet, FacetTable, FixedClock};
+use clepho::pipeline::stages::{exif::ExifStage, mark_done, mark_error, Stage, StageId};
 use rusqlite::Connection;
 
 #[test]

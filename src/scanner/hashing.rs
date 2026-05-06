@@ -53,9 +53,7 @@ fn calculate_perceptual_hash(path: &PathBuf) -> Result<String> {
     // thumbnail() preserves aspect ratio and is faster than resize for large images
     let thumbnail = img.thumbnail(64, 64);
 
-    let hasher = HasherConfig::new()
-        .hash_size(16, 16)
-        .to_hasher();
+    let hasher = HasherConfig::new().hash_size(16, 16).to_hasher();
 
     // Convert thumbnail to img_hash format
     let rgba = thumbnail.to_rgba8();

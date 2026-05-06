@@ -24,7 +24,9 @@ pub struct ClipModel {
 impl ClipModel {
     /// Create a new CLIP model instance
     pub fn new() -> Self {
-        Self { _initialized: false }
+        Self {
+            _initialized: false,
+        }
     }
 
     /// Initialize CLIP models (downloads if needed)
@@ -72,8 +74,8 @@ impl Default for ClipModel {
 
 /// Get the models directory path
 fn get_models_dir() -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir()
-        .ok_or_else(|| anyhow!("Could not find local data directory"))?;
+    let data_dir =
+        dirs::data_local_dir().ok_or_else(|| anyhow!("Could not find local data directory"))?;
     let models_dir = data_dir.join("clepho").join("models");
     std::fs::create_dir_all(&models_dir)?;
     Ok(models_dir)
@@ -108,7 +110,7 @@ fn init_visual_model() -> Result<()> {
     // Source: https://huggingface.co/Qdrant/clip-ViT-B-32-vision
     let model_path = ensure_model(
         "clip-vit-b32-vision.onnx",
-        "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx"
+        "https://huggingface.co/Qdrant/clip-ViT-B-32-vision/resolve/main/model.onnx",
     )?;
 
     let session = Session::builder()?
@@ -130,7 +132,7 @@ fn init_text_model() -> Result<()> {
     // Source: https://huggingface.co/Qdrant/clip-ViT-B-32-text
     let model_path = ensure_model(
         "clip-vit-b32-text.onnx",
-        "https://huggingface.co/Qdrant/clip-ViT-B-32-text/resolve/main/model.onnx"
+        "https://huggingface.co/Qdrant/clip-ViT-B-32-text/resolve/main/model.onnx",
     )?;
 
     let session = Session::builder()?
@@ -151,13 +153,18 @@ fn load_image_for_clip(path: &Path) -> Result<DynamicImage> {
 fn run_visual_encoder(img: &DynamicImage) -> Result<ClipEmbedding> {
     const INPUT_SIZE: u32 = 224;
 
-    let mut model = VISUAL_MODEL.get()
+    let mut model = VISUAL_MODEL
+        .get()
         .ok_or_else(|| anyhow!("Visual model not initialized"))?
         .lock()
         .map_err(|e| anyhow!("Failed to lock model: {}", e))?;
 
     // Resize to CLIP input size (224x224)
-    let resized = img.resize_exact(INPUT_SIZE, INPUT_SIZE, image::imageops::FilterType::Triangle);
+    let resized = img.resize_exact(
+        INPUT_SIZE,
+        INPUT_SIZE,
+        image::imageops::FilterType::Triangle,
+    );
     let rgb = resized.to_rgb8();
 
     // CLIP normalization constants (ImageNet stats)
@@ -184,18 +191,19 @@ fn run_visual_encoder(img: &DynamicImage) -> Result<ClipEmbedding> {
     // Create tensor
     let input_tensor = Tensor::from_array((
         [1usize, 3, INPUT_SIZE as usize, INPUT_SIZE as usize],
-        input_data.into_boxed_slice()
+        input_data.into_boxed_slice(),
     ))?;
 
     // Run inference
     let outputs = model.run(ort::inputs!["pixel_values" => input_tensor])?;
 
     // Get embedding output
-    let embedding_output = outputs.iter().next()
+    let embedding_output = outputs
+        .iter()
+        .next()
         .ok_or_else(|| anyhow!("No embedding output"))?;
 
-    let (_shape, embedding_data) = embedding_output.1
-        .try_extract_tensor::<f32>()?;
+    let (_shape, embedding_data) = embedding_output.1.try_extract_tensor::<f32>()?;
 
     // L2 normalize the embedding
     let embedding: Vec<f32> = embedding_data.to_vec();
@@ -210,7 +218,8 @@ fn run_visual_encoder(img: &DynamicImage) -> Result<ClipEmbedding> {
 
 /// Run the text encoder on a string
 fn run_text_encoder(text: &str) -> Result<ClipEmbedding> {
-    let mut model = TEXT_MODEL.get()
+    let mut model = TEXT_MODEL
+        .get()
         .ok_or_else(|| anyhow!("Text model not initialized"))?
         .lock()
         .map_err(|e| anyhow!("Failed to lock model: {}", e))?;
@@ -229,20 +238,18 @@ fn run_text_encoder(text: &str) -> Result<ClipEmbedding> {
         input_ids.push(0);
     }
 
-    let input_tensor = Tensor::from_array((
-        [1usize, 77],
-        input_ids.into_boxed_slice()
-    ))?;
+    let input_tensor = Tensor::from_array(([1usize, 77], input_ids.into_boxed_slice()))?;
 
     // Run inference
     let outputs = model.run(ort::inputs!["input_ids" => input_tensor])?;
 
     // Get embedding
-    let embedding_output = outputs.iter().next()
+    let embedding_output = outputs
+        .iter()
+        .next()
         .ok_or_else(|| anyhow!("No embedding output"))?;
 
-    let (_shape, embedding_data) = embedding_output.1
-        .try_extract_tensor::<f32>()?;
+    let (_shape, embedding_data) = embedding_output.1.try_extract_tensor::<f32>()?;
 
     // L2 normalize
     let embedding: Vec<f32> = embedding_data.to_vec();

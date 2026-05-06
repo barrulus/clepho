@@ -1,7 +1,7 @@
 //! Task list dialog for viewing and managing running background tasks.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Gauge};
+use ratatui::widgets::{Block, Borders, Clear, Gauge, Paragraph};
 
 use crate::app::App;
 use crate::tasks::BackgroundTask;
@@ -87,8 +87,7 @@ fn render_task(frame: &mut Frame, task: &BackgroundTask, index: usize, area: Rec
         task.task_type.display_name(),
         elapsed_str
     );
-    let header_text = Paragraph::new(header)
-        .style(Style::default().fg(Color::Cyan));
+    let header_text = Paragraph::new(header).style(Style::default().fg(Color::Cyan));
     let header_area = Rect::new(area.x, area.y, area.width, 1);
     frame.render_widget(header_text, header_area);
 
@@ -121,8 +120,7 @@ fn render_task(frame: &mut Frame, task: &BackgroundTask, index: usize, area: Rec
                 .gauge_style(Style::default().fg(Color::Green).bg(Color::DarkGray));
             frame.render_widget(gauge, progress_area);
         } else {
-            let status = Paragraph::new("Starting...")
-                .style(Style::default().fg(Color::Yellow));
+            let status = Paragraph::new("Starting...").style(Style::default().fg(Color::Yellow));
             frame.render_widget(status, progress_area);
         }
     }

@@ -5,7 +5,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use super::{BackgroundTask, TaskCompletionInfo, TaskId, TaskProgress, TaskState, TaskType, TaskUpdate};
+use super::{
+    BackgroundTask, TaskCompletionInfo, TaskId, TaskProgress, TaskState, TaskType, TaskUpdate,
+};
 
 /// Manages all background tasks, providing centralized control and status.
 pub struct BackgroundTaskManager {
@@ -24,7 +26,10 @@ impl BackgroundTaskManager {
 
     /// Register a new background task.
     /// Returns the TaskId and a sender for the task to send updates.
-    pub fn register_task(&mut self, task_type: TaskType) -> (TaskId, mpsc::Sender<TaskUpdate>, Arc<AtomicBool>) {
+    pub fn register_task(
+        &mut self,
+        task_type: TaskType,
+    ) -> (TaskId, mpsc::Sender<TaskUpdate>, Arc<AtomicBool>) {
         let (tx, rx) = mpsc::channel();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let task = BackgroundTask::new(task_type, cancel_flag.clone(), rx);
@@ -38,7 +43,9 @@ impl BackgroundTaskManager {
 
     /// Check if a task of the given type is already running.
     pub fn is_running(&self, task_type: TaskType) -> bool {
-        self.tasks.values().any(|t| t.task_type == task_type && t.is_running())
+        self.tasks
+            .values()
+            .any(|t| t.task_type == task_type && t.is_running())
     }
 
     /// Cancel a specific task by ID.

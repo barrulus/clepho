@@ -152,11 +152,8 @@ pub fn render(frame: &mut Frame, dialog: &MoveDialog, area: Rect) {
     frame.render_widget(block, dialog_area);
 
     // Header: show file count
-    let header = Paragraph::new(format!(
-        "Moving {} file(s) to:",
-        dialog.files_to_move.len()
-    ))
-    .style(Style::default().fg(Color::Yellow));
+    let header = Paragraph::new(format!("Moving {} file(s) to:", dialog.files_to_move.len()))
+        .style(Style::default().fg(Color::Yellow));
     frame.render_widget(header, chunks[0]);
 
     // Directory listing

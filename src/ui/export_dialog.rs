@@ -47,7 +47,8 @@ impl ExportDialog {
     fn update_format(&mut self) {
         self.format = self.formats[self.selected_index];
         // Update output path extension
-        let stem = self.output_path
+        let stem = self
+            .output_path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "clepho_export".to_string());
@@ -100,8 +101,7 @@ pub fn render(frame: &mut Frame, dialog: &ExportDialog, area: Rect) {
     frame.render_widget(block, dialog_area);
 
     // Header
-    let header = Paragraph::new("Select export format:")
-        .style(Style::default().fg(Color::Green));
+    let header = Paragraph::new("Select export format:").style(Style::default().fg(Color::Green));
     frame.render_widget(header, chunks[0]);
 
     // Format selection
@@ -134,7 +134,11 @@ pub fn render(frame: &mut Frame, dialog: &ExportDialog, area: Rect) {
     // Output path
     let output = Paragraph::new(format!("Output: {}", dialog.output_path.display()))
         .style(Style::default().fg(Color::DarkGray))
-        .block(Block::default().borders(Borders::ALL).title(" Output File "));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Output File "),
+        );
     frame.render_widget(output, chunks[2]);
 
     // Footer

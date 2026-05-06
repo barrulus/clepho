@@ -133,7 +133,9 @@ impl FilenameParts {
         if filename.len() > max_length.saturating_sub(ext_len) {
             filename = filename[..max_length.saturating_sub(ext_len)].to_string();
             // Clean up any trailing underscore or hyphen
-            filename = filename.trim_end_matches(|c| c == '_' || c == '-').to_string();
+            filename = filename
+                .trim_end_matches(|c| c == '_' || c == '-')
+                .to_string();
         }
 
         format!("{}.{}", filename, self.extension)
@@ -169,8 +171,20 @@ fn extract_event(metadata: &PhotoMetadata) -> Option<String> {
     if let Some(ref tags) = metadata.tags {
         let tags_lower = tags.to_lowercase();
         // Look for common event keywords
-        for keyword in ["birthday", "wedding", "vacation", "holiday", "christmas", "easter",
-                        "graduation", "party", "concert", "trip", "travel", "family"] {
+        for keyword in [
+            "birthday",
+            "wedding",
+            "vacation",
+            "holiday",
+            "christmas",
+            "easter",
+            "graduation",
+            "party",
+            "concert",
+            "trip",
+            "travel",
+            "family",
+        ] {
             if tags_lower.contains(keyword) {
                 return Some(keyword.to_string());
             }
@@ -180,8 +194,20 @@ fn extract_event(metadata: &PhotoMetadata) -> Option<String> {
     // Try to extract from description
     if let Some(ref desc) = metadata.description {
         let desc_lower = desc.to_lowercase();
-        for keyword in ["birthday", "wedding", "vacation", "holiday", "christmas", "easter",
-                        "graduation", "party", "concert", "trip", "travel", "family"] {
+        for keyword in [
+            "birthday",
+            "wedding",
+            "vacation",
+            "holiday",
+            "christmas",
+            "easter",
+            "graduation",
+            "party",
+            "concert",
+            "trip",
+            "travel",
+            "family",
+        ] {
             if desc_lower.contains(keyword) {
                 return Some(keyword.to_string());
             }
@@ -196,12 +222,7 @@ fn extract_brief_description(metadata: &PhotoMetadata, max_words: usize) -> Opti
     let desc = metadata.description.as_ref()?;
 
     // Take first sentence or first few words
-    let first_sentence: String = desc
-        .split('.')
-        .next()
-        .unwrap_or(desc)
-        .trim()
-        .to_string();
+    let first_sentence: String = desc.split('.').next().unwrap_or(desc).trim().to_string();
 
     let words: Vec<&str> = first_sentence.split_whitespace().take(max_words).collect();
     if words.is_empty() {
@@ -245,11 +266,12 @@ pub fn generate_filename_parts(metadata: &PhotoMetadata, existing_count: u32) ->
     // People from face recognition
     if !metadata.people_names.is_empty() {
         parts.people = Some(
-            metadata.people_names
+            metadata
+                .people_names
                 .iter()
                 .map(|n| sanitize_filename(n))
                 .collect::<Vec<_>>()
-                .join("-")
+                .join("-"),
         );
     }
 
@@ -330,8 +352,11 @@ pub fn preview_centralise(
 
         // Handle conflicts by incrementing count
         let mut conflict_count = count;
-        while dest_counts.values().any(|_| destination.exists()) ||
-              operations.iter().any(|op: &PlannedOperation| op.destination == destination) {
+        while dest_counts.values().any(|_| destination.exists())
+            || operations
+                .iter()
+                .any(|op: &PlannedOperation| op.destination == destination)
+        {
             conflict_count += 1;
             let mut new_parts = filename_parts.clone();
             new_parts.count = conflict_count + 1;
@@ -342,9 +367,7 @@ pub fn preview_centralise(
         dest_counts.insert(base_dest, conflict_count);
 
         // Get file size
-        let size_bytes = std::fs::metadata(source)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let size_bytes = std::fs::metadata(source).map(|m| m.len()).unwrap_or(0);
         total_bytes += size_bytes;
 
         operations.push(PlannedOperation {
@@ -388,11 +411,9 @@ pub fn execute_centralise(
 
         // Perform the operation
         let op_result = match operation {
-            CentraliseOperation::Copy => {
-                std::fs::copy(&planned.source, &planned.destination)
-                    .map(|_| ())
-                    .context("Copy failed")
-            }
+            CentraliseOperation::Copy => std::fs::copy(&planned.source, &planned.destination)
+                .map(|_| ())
+                .context("Copy failed"),
             CentraliseOperation::Move => {
                 // Try rename first (same filesystem)
                 std::fs::rename(&planned.source, &planned.destination)
@@ -437,8 +458,14 @@ mod tests {
     #[test]
     fn test_sanitize_filename() {
         assert_eq!(sanitize_filename("Hello World"), "hello-world");
-        assert_eq!(sanitize_filename("Test  Multiple   Spaces"), "test-multiple-spaces");
-        assert_eq!(sanitize_filename("Special@#$Characters"), "special-characters");
+        assert_eq!(
+            sanitize_filename("Test  Multiple   Spaces"),
+            "test-multiple-spaces"
+        );
+        assert_eq!(
+            sanitize_filename("Special@#$Characters"),
+            "special-characters"
+        );
     }
 
     #[test]
@@ -455,7 +482,10 @@ mod tests {
         };
 
         let filename = parts.to_filename(100);
-        assert_eq!(filename, "20241120-1435_vacation_john-jane_beach-sunset_001.jpg");
+        assert_eq!(
+            filename,
+            "20241120-1435_vacation_john-jane_beach-sunset_001.jpg"
+        );
     }
 
     #[test]

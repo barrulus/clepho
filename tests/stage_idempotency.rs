@@ -53,28 +53,12 @@ fn idempotent_outcome_is_signalled_explicitly() {
     c.execute("INSERT INTO objects(name) VALUES ('sunset')", [])
         .unwrap();
 
-    let first = pipeline_write_facet(
-        &c,
-        FacetTable::PhotoObjects,
-        1,
-        1,
-        "object",
-        "sunset",
-        &clk,
-    )
-    .unwrap();
+    let first =
+        pipeline_write_facet(&c, FacetTable::PhotoObjects, 1, 1, "object", "sunset", &clk).unwrap();
     assert_eq!(first, WriteOutcome::Inserted);
 
-    let second = pipeline_write_facet(
-        &c,
-        FacetTable::PhotoObjects,
-        1,
-        1,
-        "object",
-        "sunset",
-        &clk,
-    )
-    .unwrap();
+    let second =
+        pipeline_write_facet(&c, FacetTable::PhotoObjects, 1, 1, "object", "sunset", &clk).unwrap();
     assert_eq!(
         second,
         WriteOutcome::Idempotent,

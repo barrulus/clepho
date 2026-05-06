@@ -4,19 +4,21 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
-use super::{PhotoMetadata, exif_orientation_to_degrees, read_exif_rotation_from_file};
-use super::schema::{SCHEMA, MIGRATIONS};
-use super::embeddings::{SearchResult, EmbeddingRecord, embedding_to_bytes, bytes_to_embedding, cosine_similarity};
-use super::faces::{
-    BoundingBox, Face, FaceCluster, FaceWithPhoto, Person,
-    embedding_to_bytes as face_embedding_to_bytes, bytes_to_embedding as face_bytes_to_embedding,
+use super::albums::{Album, UserTag};
+use super::embeddings::{
+    bytes_to_embedding, cosine_similarity, embedding_to_bytes, EmbeddingRecord, SearchResult,
 };
+use super::faces::{
+    bytes_to_embedding as face_bytes_to_embedding, embedding_to_bytes as face_embedding_to_bytes,
+    BoundingBox, Face, FaceCluster, FaceWithPhoto, Person,
+};
+use super::schedule::{ScheduleStatus, ScheduledTask, ScheduledTaskType};
+use super::schema::{MIGRATIONS, SCHEMA};
+use super::similarity::hamming_distance;
 use super::similarity::PhotoRecord;
 use super::similarity::SimilarityGroup;
 use super::trash::TrashedPhoto;
-use super::schedule::{ScheduledTask, ScheduledTaskType, ScheduleStatus};
-use super::albums::{UserTag, Album};
-use super::similarity::hamming_distance;
+use super::{exif_orientation_to_degrees, read_exif_rotation_from_file, PhotoMetadata};
 
 pub struct SqliteDb {
     pub(crate) conn: Connection,
@@ -111,10 +113,13 @@ impl SqliteDb {
         Ok(())
     }
 
-    pub fn get_photos_mtime_in_dir(&self, directory: &str) -> Result<Vec<(String, Option<String>)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT path, modified_at FROM photos WHERE directory = ?",
-        )?;
+    pub fn get_photos_mtime_in_dir(
+        &self,
+        directory: &str,
+    ) -> Result<Vec<(String, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, modified_at FROM photos WHERE directory = ?")?;
         let results = stmt
             .query_map([directory], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -232,13 +237,23 @@ impl SqliteDb {
                 }
                 if score > 0.0 {
                     let similarity = score / query_words.len() as f32;
-                    Some(SearchResult { photo_id: id, path, filename, similarity, description: Some(description) })
+                    Some(SearchResult {
+                        photo_id: id,
+                        path,
+                        filename,
+                        similarity,
+                        description: Some(description),
+                    })
                 } else {
                     None
                 }
             })
             .collect();
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(limit);
         Ok(results)
     }
@@ -259,9 +274,7 @@ impl SqliteDb {
                 let exif_degrees = exif_orientation_to_degrees(exif_orientation);
                 Ok((exif_degrees + user_rotation) % 360)
             }
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                Ok(read_exif_rotation_from_file(path))
-            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(read_exif_rotation_from_file(path)),
             Err(e) => Err(e.into()),
         }
     }
@@ -278,21 +291,24 @@ impl SqliteDb {
 
     fn ensure_photo_exists(&self, path: &Path) -> Result<()> {
         let path_str = path.to_string_lossy();
-        let exists: bool = self.conn.query_row(
-            "SELECT 1 FROM photos WHERE path = ?",
-            [path_str.as_ref()],
-            |_| Ok(true),
-        ).unwrap_or(false);
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM photos WHERE path = ?",
+                [path_str.as_ref()],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
         if !exists {
-            let filename = path.file_name()
+            let filename = path
+                .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let directory = path.parent()
+            let directory = path
+                .parent()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let size_bytes = std::fs::metadata(path)
-                .map(|m| m.len() as i64)
-                .unwrap_or(0);
+            let size_bytes = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
             self.conn.execute(
                 "INSERT INTO photos (path, filename, directory, size_bytes) VALUES (?, ?, ?, ?)",
                 rusqlite::params![path_str.as_ref(), filename, directory, size_bytes],
@@ -304,11 +320,14 @@ impl SqliteDb {
     pub fn rotate_photo_cw(&self, path: &Path) -> Result<i32> {
         self.ensure_photo_exists(path)?;
         let path_str = path.to_string_lossy();
-        let current: i32 = self.conn.query_row(
-            "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
-            [path_str.as_ref()],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let current: i32 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
+                [path_str.as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         let new_rotation = (current + 90) % 360;
         self.conn.execute(
             "UPDATE photos SET user_rotation = ? WHERE path = ?",
@@ -320,11 +339,14 @@ impl SqliteDb {
     pub fn rotate_photo_ccw(&self, path: &Path) -> Result<i32> {
         self.ensure_photo_exists(path)?;
         let path_str = path.to_string_lossy();
-        let current: i32 = self.conn.query_row(
-            "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
-            [path_str.as_ref()],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let current: i32 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(user_rotation, 0) FROM photos WHERE path = ?",
+                [path_str.as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         let new_rotation = (current + 270) % 360;
         self.conn.execute(
             "UPDATE photos SET user_rotation = ? WHERE path = ?",
@@ -364,7 +386,13 @@ impl SqliteDb {
             GROUP BY p.id
             "#,
             [name],
-            |row| Ok(Person { id: row.get(0)?, name: row.get(1)?, face_count: row.get(2)? }),
+            |row| {
+                Ok(Person {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    face_count: row.get(2)?,
+                })
+            },
         );
         match result {
             Ok(person) => Ok(Some(person)),
@@ -390,7 +418,10 @@ impl SqliteDb {
     }
 
     pub fn delete_person(&self, person_id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM people WHERE id = ?", rusqlite::params![person_id])?;
+        self.conn.execute(
+            "DELETE FROM people WHERE id = ?",
+            rusqlite::params![person_id],
+        )?;
         Ok(())
     }
 
@@ -405,8 +436,13 @@ impl SqliteDb {
             "#,
         )?;
         let people = stmt
-            .query_map([], |row| Ok(Person { id: row.get(0)?, name: row.get(1)?, face_count: row.get(2)? }))
-            ?
+            .query_map([], |row| {
+                Ok(Person {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    face_count: row.get(2)?,
+                })
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(people)
@@ -422,7 +458,13 @@ impl SqliteDb {
             GROUP BY p.id
             "#,
             [person_id],
-            |row| Ok(Person { id: row.get(0)?, name: row.get(1)?, face_count: row.get(2)? }),
+            |row| {
+                Ok(Person {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    face_count: row.get(2)?,
+                })
+            },
         );
         match result {
             Ok(person) => Ok(Some(person)),
@@ -464,7 +506,12 @@ impl SqliteDb {
                 Ok(Face {
                     id: row.get(0)?,
                     photo_id: row.get(1)?,
-                    bbox: BoundingBox { x: row.get(2)?, y: row.get(3)?, width: row.get(4)?, height: row.get(5)? },
+                    bbox: BoundingBox {
+                        x: row.get(2)?,
+                        y: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
+                    },
                     embedding: embedding_bytes.map(|b| face_bytes_to_embedding(&b)),
                     person_id: row.get(7)?,
                     confidence: row.get(8)?,
@@ -493,7 +540,12 @@ impl SqliteDb {
                     face: Face {
                         id: row.get(0)?,
                         photo_id: row.get(1)?,
-                        bbox: BoundingBox { x: row.get(2)?, y: row.get(3)?, width: row.get(4)?, height: row.get(5)? },
+                        bbox: BoundingBox {
+                            x: row.get(2)?,
+                            y: row.get(3)?,
+                            width: row.get(4)?,
+                            height: row.get(5)?,
+                        },
                         embedding: embedding_bytes.map(|b| face_bytes_to_embedding(&b)),
                         person_id: row.get(7)?,
                         confidence: row.get(8)?,
@@ -541,7 +593,12 @@ impl SqliteDb {
                     face: Face {
                         id: row.get(0)?,
                         photo_id: row.get(1)?,
-                        bbox: BoundingBox { x: row.get(2)?, y: row.get(3)?, width: row.get(4)?, height: row.get(5)? },
+                        bbox: BoundingBox {
+                            x: row.get(2)?,
+                            y: row.get(3)?,
+                            width: row.get(4)?,
+                            height: row.get(5)?,
+                        },
                         embedding: embedding_bytes.map(|b| face_bytes_to_embedding(&b)),
                         person_id: row.get(7)?,
                         confidence: row.get(8)?,
@@ -555,7 +612,11 @@ impl SqliteDb {
         Ok(faces)
     }
 
-    pub fn get_photos_without_faces_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_faces_in_dir(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         let dir_pattern = if directory.ends_with('/') {
             format!("{}%", directory)
         } else {
@@ -572,7 +633,9 @@ impl SqliteDb {
             "#,
         )?;
         let results = stmt
-            .query_map(rusqlite::params![dir_pattern, limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(rusqlite::params![dir_pattern, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(results)
@@ -601,19 +664,23 @@ impl SqliteDb {
     }
 
     pub fn count_faces(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM faces", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM faces", [], |row| row.get(0))?;
         Ok(count)
     }
 
     pub fn count_people(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM people", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM people", [], |row| row.get(0))?;
         Ok(count)
     }
 
     pub fn get_all_face_embeddings(&self) -> Result<Vec<(i64, Vec<f32>)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, embedding FROM faces WHERE embedding IS NOT NULL",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, embedding FROM faces WHERE embedding IS NOT NULL")?;
         let results = stmt
             .query_map([], |row| {
                 let bytes: Vec<u8> = row.get(1)?;
@@ -624,7 +691,10 @@ impl SqliteDb {
         Ok(results)
     }
 
-    pub fn get_faces_without_embeddings(&self, limit: usize) -> Result<Vec<(i64, i64, BoundingBox)>> {
+    pub fn get_faces_without_embeddings(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(i64, i64, BoundingBox)>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, photo_id, bbox_x, bbox_y, bbox_w, bbox_h
@@ -635,7 +705,16 @@ impl SqliteDb {
         )?;
         let results = stmt
             .query_map([limit as i64], |row| {
-                Ok((row.get(0)?, row.get(1)?, BoundingBox { x: row.get(2)?, y: row.get(3)?, width: row.get(4)?, height: row.get(5)? }))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    BoundingBox {
+                        x: row.get(2)?,
+                        y: row.get(3)?,
+                        width: row.get(4)?,
+                        height: row.get(5)?,
+                    },
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -643,11 +722,11 @@ impl SqliteDb {
     }
 
     pub fn get_photo_path(&self, photo_id: i64) -> Result<Option<String>> {
-        let result = self.conn.query_row(
-            "SELECT path FROM photos WHERE id = ?",
-            [photo_id],
-            |row| row.get(0),
-        );
+        let result =
+            self.conn
+                .query_row("SELECT path FROM photos WHERE id = ?", [photo_id], |row| {
+                    row.get(0)
+                });
         match result {
             Ok(path) => Ok(Some(path)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -674,7 +753,11 @@ impl SqliteDb {
         Ok(count)
     }
 
-    pub fn create_face_cluster(&self, representative_face_id: Option<i64>, auto_name: &str) -> Result<i64> {
+    pub fn create_face_cluster(
+        &self,
+        representative_face_id: Option<i64>,
+        auto_name: &str,
+    ) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO face_clusters (representative_face_id, auto_name) VALUES (?, ?)",
             rusqlite::params![representative_face_id, auto_name],
@@ -682,7 +765,12 @@ impl SqliteDb {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn add_face_to_cluster(&self, face_id: i64, cluster_id: i64, similarity_score: f32) -> Result<()> {
+    pub fn add_face_to_cluster(
+        &self,
+        face_id: i64,
+        cluster_id: i64,
+        similarity_score: f32,
+    ) -> Result<()> {
         self.conn.execute(
             r#"
             INSERT OR REPLACE INTO face_cluster_members (face_id, cluster_id, similarity_score)
@@ -758,7 +846,9 @@ impl SqliteDb {
             "#,
         )?;
         let results = stmt
-            .query_map([person_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .query_map([person_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(results)
@@ -768,7 +858,12 @@ impl SqliteDb {
     // Embedding operations (from embeddings.rs)
     // ========================================================================
 
-    pub fn store_embedding(&self, photo_id: i64, embedding: &[f32], model_name: &str) -> Result<()> {
+    pub fn store_embedding(
+        &self,
+        photo_id: i64,
+        embedding: &[f32],
+        model_name: &str,
+    ) -> Result<()> {
         let bytes = embedding_to_bytes(embedding);
         self.conn.execute(
             r#"
@@ -801,9 +896,9 @@ impl SqliteDb {
     }
 
     pub fn get_all_embeddings(&self) -> Result<Vec<EmbeddingRecord>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT photo_id, embedding, model_name FROM embeddings",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT photo_id, embedding, model_name FROM embeddings")?;
         let records = stmt
             .query_map([], |row| {
                 let bytes: Vec<u8> = row.get(1)?;
@@ -818,7 +913,12 @@ impl SqliteDb {
         Ok(records)
     }
 
-    pub fn semantic_search(&self, query_embedding: &[f32], limit: usize, min_similarity: f32) -> Result<Vec<SearchResult>> {
+    pub fn semantic_search(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_similarity: f32,
+    ) -> Result<Vec<SearchResult>> {
         let embeddings = self.get_all_embeddings()?;
         let mut results: Vec<(i64, f32)> = embeddings
             .iter()
@@ -877,7 +977,11 @@ impl SqliteDb {
         Ok(results)
     }
 
-    pub fn get_photos_without_embeddings_in_dir(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_embeddings_in_dir(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         let dir_pattern = if directory.ends_with('/') {
             format!("{}%", directory)
         } else {
@@ -894,14 +998,18 @@ impl SqliteDb {
             "#,
         )?;
         let results = stmt
-            .query_map(rusqlite::params![dir_pattern, limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(rusqlite::params![dir_pattern, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(results)
     }
 
     pub fn count_embeddings(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -1038,12 +1146,18 @@ impl SqliteDb {
     }
 
     pub fn mark_for_deletion(&self, photo_id: i64) -> Result<()> {
-        self.conn.execute("UPDATE photos SET marked_for_deletion = 1 WHERE id = ?", rusqlite::params![photo_id])?;
+        self.conn.execute(
+            "UPDATE photos SET marked_for_deletion = 1 WHERE id = ?",
+            rusqlite::params![photo_id],
+        )?;
         Ok(())
     }
 
     pub fn unmark_for_deletion(&self, photo_id: i64) -> Result<()> {
-        self.conn.execute("UPDATE photos SET marked_for_deletion = 0 WHERE id = ?", rusqlite::params![photo_id])?;
+        self.conn.execute(
+            "UPDATE photos SET marked_for_deletion = 0 WHERE id = ?",
+            rusqlite::params![photo_id],
+        )?;
         Ok(())
     }
 
@@ -1078,7 +1192,9 @@ impl SqliteDb {
     }
 
     pub fn delete_marked_photos(&self) -> Result<usize> {
-        let count = self.conn.execute("DELETE FROM photos WHERE marked_for_deletion = 1", [])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM photos WHERE marked_for_deletion = 1", [])?;
         Ok(count)
     }
 
@@ -1087,14 +1203,20 @@ impl SqliteDb {
             return Ok(0);
         }
         let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
-        let sql = format!("DELETE FROM photos WHERE id IN ({})", placeholders.join(", "));
-        let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let sql = format!(
+            "DELETE FROM photos WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let count = self.conn.execute(&sql, params.as_slice())?;
         Ok(count)
     }
 
     pub fn get_photo_count(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM photos", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM photos", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -1103,11 +1225,11 @@ impl SqliteDb {
     // ========================================================================
 
     pub fn mark_trashed(&self, photo_id: i64, trash_path: &Path) -> Result<()> {
-        let original_path: String = self.conn.query_row(
-            "SELECT path FROM photos WHERE id = ?",
-            [photo_id],
-            |row| row.get(0),
-        )?;
+        let original_path: String =
+            self.conn
+                .query_row("SELECT path FROM photos WHERE id = ?", [photo_id], |row| {
+                    row.get(0)
+                })?;
         let trash_path_str = trash_path.to_string_lossy();
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
@@ -1169,7 +1291,8 @@ impl SqliteDb {
     }
 
     pub fn delete_trashed_photo(&self, photo_id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM photos WHERE id = ?", [photo_id])?;
+        self.conn
+            .execute("DELETE FROM photos WHERE id = ?", [photo_id])?;
         Ok(())
     }
 
@@ -1252,9 +1375,8 @@ impl SqliteDb {
         hours_start: Option<u8>,
         hours_end: Option<u8>,
     ) -> Result<i64> {
-        let photo_ids_json = photo_ids.map(|ids| {
-            serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string())
-        });
+        let photo_ids_json =
+            photo_ids.map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()));
         self.conn.execute(
             r#"
             INSERT INTO scheduled_tasks (
@@ -1362,7 +1484,8 @@ impl SqliteDb {
     }
 
     pub fn delete_schedule(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM scheduled_tasks WHERE id = ?", [id])?;
+        self.conn
+            .execute("DELETE FROM scheduled_tasks WHERE id = ?", [id])?;
         Ok(())
     }
 
@@ -1419,9 +1542,17 @@ impl SqliteDb {
     // ========================================================================
 
     pub fn get_all_tags(&self) -> Result<Vec<UserTag>> {
-        let mut stmt = self.conn.prepare("SELECT id, name, color FROM user_tags ORDER BY name")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, color FROM user_tags ORDER BY name")?;
         let tags = stmt
-            .query_map([], |row| Ok(UserTag { id: row.get(0)?, name: row.get(1)?, color: row.get(2)? }))?
+            .query_map([], |row| {
+                Ok(UserTag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                })
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(tags)
@@ -1440,20 +1571,31 @@ impl SqliteDb {
         let existing = self.conn.query_row(
             "SELECT id, name, color FROM user_tags WHERE name = ? COLLATE NOCASE",
             [name],
-            |row| Ok(UserTag { id: row.get(0)?, name: row.get(1)?, color: row.get(2)? }),
+            |row| {
+                Ok(UserTag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                })
+            },
         );
         match existing {
             Ok(tag) => Ok(tag),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 let id = self.create_tag(name, None)?;
-                Ok(UserTag { id, name: name.to_string(), color: "#808080".to_string() })
+                Ok(UserTag {
+                    id,
+                    name: name.to_string(),
+                    color: "#808080".to_string(),
+                })
             }
             Err(e) => Err(e.into()),
         }
     }
 
     pub fn delete_tag(&self, tag_id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM user_tags WHERE id = ?", [tag_id])?;
+        self.conn
+            .execute("DELETE FROM user_tags WHERE id = ?", [tag_id])?;
         Ok(())
     }
 
@@ -1476,7 +1618,13 @@ impl SqliteDb {
             "#,
         )?;
         let tags = stmt
-            .query_map([photo_id], |row| Ok(UserTag { id: row.get(0)?, name: row.get(1)?, color: row.get(2)? }))?
+            .query_map([photo_id], |row| {
+                Ok(UserTag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                })
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(tags)
@@ -1499,7 +1647,9 @@ impl SqliteDb {
     }
 
     pub fn get_photos_with_tag(&self, tag_id: i64) -> Result<Vec<i64>> {
-        let mut stmt = self.conn.prepare("SELECT photo_id FROM photo_user_tags WHERE tag_id = ?")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT photo_id FROM photo_user_tags WHERE tag_id = ?")?;
         let ids = stmt
             .query_map([tag_id], |row| row.get(0))?
             .filter_map(|r| r.ok())
@@ -1513,7 +1663,13 @@ impl SqliteDb {
             "SELECT id, name, color FROM user_tags WHERE name LIKE ? COLLATE NOCASE ORDER BY name LIMIT 10",
         )?;
         let tags = stmt
-            .query_map([pattern], |row| Ok(UserTag { id: row.get(0)?, name: row.get(1)?, color: row.get(2)? }))?
+            .query_map([pattern], |row| {
+                Ok(UserTag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                })
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(tags)
@@ -1549,7 +1705,12 @@ impl SqliteDb {
         Ok(albums)
     }
 
-    pub fn create_album(&self, name: &str, description: Option<&str>, is_smart: bool) -> Result<i64> {
+    pub fn create_album(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        is_smart: bool,
+    ) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO albums (name, description, is_smart) VALUES (?, ?, ?)",
             rusqlite::params![name, description, if is_smart { 1 } else { 0 }],
@@ -1558,7 +1719,8 @@ impl SqliteDb {
     }
 
     pub fn delete_album(&self, album_id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM albums WHERE id = ?", [album_id])?;
+        self.conn
+            .execute("DELETE FROM albums WHERE id = ?", [album_id])?;
         Ok(())
     }
 
@@ -1644,7 +1806,8 @@ impl SqliteDb {
             .map(|id| Box::new(*id) as Box<dyn rusqlite::ToSql>)
             .collect();
         params_vec.push(Box::new(tag_ids.len() as i64));
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let ids: Vec<i64> = stmt
             .query_map(params_refs.as_slice(), |row| row.get(0))?
             .filter_map(|r| r.ok())
@@ -1683,7 +1846,10 @@ impl SqliteDb {
         Ok(tasks)
     }
 
-    pub fn get_photos_without_description_in_dir(&self, directory: &Path) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_description_in_dir(
+        &self,
+        directory: &Path,
+    ) -> Result<Vec<(i64, String)>> {
         let dir_str = directory.to_string_lossy();
         let pattern = format!("{}%", dir_str);
         let mut stmt = self.conn.prepare(
@@ -1701,11 +1867,14 @@ impl SqliteDb {
     }
 
     pub fn get_photo_description(&self, photo_id: i64) -> Result<Option<String>> {
-        let result: Option<String> = self.conn.query_row(
-            "SELECT description FROM photos WHERE id = ?",
-            [photo_id],
-            |row| row.get(0),
-        ).ok();
+        let result: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT description FROM photos WHERE id = ?",
+                [photo_id],
+                |row| row.get(0),
+            )
+            .ok();
         Ok(result)
     }
 
@@ -1902,14 +2071,18 @@ impl SqliteDb {
     // ========================================================================
 
     pub fn photo_exists_by_path(&self, path: &str) -> bool {
-        self.conn.query_row(
-            "SELECT 1 FROM photos WHERE path = ?",
-            [path],
-            |_| Ok(true),
-        ).unwrap_or(false)
+        self.conn
+            .query_row("SELECT 1 FROM photos WHERE path = ?", [path], |_| Ok(true))
+            .unwrap_or(false)
     }
 
-    pub fn insert_basic_photo(&self, path: &str, filename: &str, directory: &str, size: i64) -> Result<()> {
+    pub fn insert_basic_photo(
+        &self,
+        path: &str,
+        filename: &str,
+        directory: &str,
+        size: i64,
+    ) -> Result<()> {
         self.conn.execute(
             r#"
             INSERT OR IGNORE INTO photos (path, filename, directory, size_bytes, scanned_at)
@@ -1920,7 +2093,11 @@ impl SqliteDb {
         Ok(())
     }
 
-    pub fn get_photos_without_description_in_directory(&self, directory: &str, limit: usize) -> Result<Vec<(i64, String)>> {
+    pub fn get_photos_without_description_in_directory(
+        &self,
+        directory: &str,
+        limit: usize,
+    ) -> Result<Vec<(i64, String)>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, path
@@ -1930,7 +2107,9 @@ impl SqliteDb {
             "#,
         )?;
         let results = stmt
-            .query_map(rusqlite::params![directory, limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(rusqlite::params![directory, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok(results)
@@ -1977,16 +2156,19 @@ impl SqliteDb {
     }
 
     pub fn count_photos_without_faces_in_dir(&self, directory: &str) -> Result<i64> {
-        let count: i64 = self.conn.query_row(
-            r#"
+        let count: i64 = self
+            .conn
+            .query_row(
+                r#"
             SELECT COUNT(*)
             FROM photos p
             WHERE p.directory = ?
               AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.photo_id = p.id)
             "#,
-            [directory],
-            |row| row.get(0),
-        ).unwrap_or(0);
+                [directory],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         Ok(count)
     }
 }
@@ -1994,15 +2176,11 @@ impl SqliteDb {
 /// Helper to convert a row to ScheduledTask.
 fn row_to_scheduled_task(row: &rusqlite::Row) -> rusqlite::Result<ScheduledTask> {
     let task_type_str: String = row.get(1)?;
-    let task_type = ScheduledTaskType::from_str(&task_type_str)
-        .unwrap_or(ScheduledTaskType::Scan);
+    let task_type = ScheduledTaskType::from_str(&task_type_str).unwrap_or(ScheduledTaskType::Scan);
     let photo_ids_json: Option<String> = row.get(3)?;
-    let photo_ids = photo_ids_json.and_then(|json| {
-        serde_json::from_str::<Vec<i64>>(&json).ok()
-    });
+    let photo_ids = photo_ids_json.and_then(|json| serde_json::from_str::<Vec<i64>>(&json).ok());
     let status_str: String = row.get(7)?;
-    let status = ScheduleStatus::from_str(&status_str)
-        .unwrap_or(ScheduleStatus::Pending);
+    let status = ScheduleStatus::from_str(&status_str).unwrap_or(ScheduleStatus::Pending);
     Ok(ScheduledTask {
         id: row.get(0)?,
         task_type,

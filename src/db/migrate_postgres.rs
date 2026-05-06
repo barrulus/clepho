@@ -64,7 +64,7 @@ fn migrate_photos(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> 
                 description, tags, llm_processed_at,
                 marked_for_deletion, is_favorite,
                 original_path, trashed_at
-         FROM photos"
+         FROM photos",
     )?;
 
     let rows = stmt.query_map([], |row| {
@@ -166,7 +166,7 @@ fn migrate_faces(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
     let mut stmt = sqlite.prepare(
         "SELECT id, photo_id, bbox_x, bbox_y, bbox_w, bbox_h, embedding, embedding_dim,
                 person_id, confidence, created_at
-         FROM faces"
+         FROM faces",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -226,7 +226,7 @@ fn migrate_face_scans(sqlite: &Connection, pg: &mut postgres::Client) -> Result<
 
 fn migrate_embeddings(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
     let mut stmt = sqlite.prepare(
-        "SELECT photo_id, embedding, embedding_dim, model_name, created_at FROM embeddings"
+        "SELECT photo_id, embedding, embedding_dim, model_name, created_at FROM embeddings",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -254,9 +254,8 @@ fn migrate_embeddings(sqlite: &Connection, pg: &mut postgres::Client) -> Result<
 }
 
 fn migrate_face_clusters(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
-    let mut stmt = sqlite.prepare(
-        "SELECT id, representative_face_id, auto_name, created_at FROM face_clusters"
-    )?;
+    let mut stmt = sqlite
+        .prepare("SELECT id, representative_face_id, auto_name, created_at FROM face_clusters")?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -282,9 +281,8 @@ fn migrate_face_clusters(sqlite: &Connection, pg: &mut postgres::Client) -> Resu
 }
 
 fn migrate_face_cluster_members(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
-    let mut stmt = sqlite.prepare(
-        "SELECT face_id, cluster_id, similarity_score FROM face_cluster_members"
-    )?;
+    let mut stmt =
+        sqlite.prepare("SELECT face_id, cluster_id, similarity_score FROM face_cluster_members")?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -310,7 +308,7 @@ fn migrate_face_cluster_members(sqlite: &Connection, pg: &mut postgres::Client) 
 
 fn migrate_similarity_groups(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
     let mut stmt = sqlite.prepare(
-        "SELECT id, created_at, group_type, representative_photo_id FROM similarity_groups"
+        "SELECT id, created_at, group_type, representative_photo_id FROM similarity_groups",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -338,7 +336,7 @@ fn migrate_similarity_groups(sqlite: &Connection, pg: &mut postgres::Client) -> 
 
 fn migrate_photo_similarity(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
     let mut stmt = sqlite.prepare(
-        "SELECT photo_id, group_id, similarity_score, is_representative FROM photo_similarity"
+        "SELECT photo_id, group_id, similarity_score, is_representative FROM photo_similarity",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -454,9 +452,7 @@ fn migrate_user_tags(sqlite: &Connection, pg: &mut postgres::Client) -> Result<(
 }
 
 fn migrate_photo_user_tags(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
-    let mut stmt = sqlite.prepare(
-        "SELECT photo_id, tag_id, created_at FROM photo_user_tags"
-    )?;
+    let mut stmt = sqlite.prepare("SELECT photo_id, tag_id, created_at FROM photo_user_tags")?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -513,9 +509,8 @@ fn migrate_albums(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> 
 }
 
 fn migrate_album_photos(sqlite: &Connection, pg: &mut postgres::Client) -> Result<()> {
-    let mut stmt = sqlite.prepare(
-        "SELECT album_id, photo_id, position, added_at FROM album_photos"
-    )?;
+    let mut stmt =
+        sqlite.prepare("SELECT album_id, photo_id, position, added_at FROM album_photos")?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -545,7 +540,7 @@ fn migrate_scheduled_tasks(sqlite: &Connection, pg: &mut postgres::Client) -> Re
         "SELECT id, task_type, target_path, photo_ids, scheduled_at,
                 hours_start, hours_end, status, created_at,
                 started_at, completed_at, error_message
-         FROM scheduled_tasks"
+         FROM scheduled_tasks",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
@@ -573,7 +568,9 @@ fn migrate_scheduled_tasks(sqlite: &Connection, pg: &mut postgres::Client) -> Re
                 started_at, completed_at, error_message)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
              ON CONFLICT (id) DO NOTHING",
-            &[&r.0, &r.1, &r.2, &r.3, &r.4, &r.5, &r.6, &r.7, &r.8, &r.9, &r.10, &r.11],
+            &[
+                &r.0, &r.1, &r.2, &r.3, &r.4, &r.5, &r.6, &r.7, &r.8, &r.9, &r.10, &r.11,
+            ],
         )?;
         count += 1;
     }
@@ -597,16 +594,10 @@ fn reset_sequences(pg: &mut postgres::Client) -> Result<()> {
     ];
 
     for (table, seq) in &sequences {
-        let row = pg.query_one(
-            &format!("SELECT COALESCE(MAX(id), 0) FROM {}", table),
-            &[],
-        )?;
+        let row = pg.query_one(&format!("SELECT COALESCE(MAX(id), 0) FROM {}", table), &[])?;
         let max_id: i64 = row.get(0);
         if max_id > 0 {
-            pg.execute(
-                &format!("SELECT setval('{}', $1)", seq),
-                &[&max_id],
-            )?;
+            pg.execute(&format!("SELECT setval('{}', $1)", seq), &[&max_id])?;
         }
     }
 

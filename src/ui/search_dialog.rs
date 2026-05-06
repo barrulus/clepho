@@ -219,9 +219,7 @@ pub fn render(frame: &mut Frame, dialog: &SearchDialog, area: Rect) {
     frame.render_widget(status, chunks[2]);
 
     // Footer
-    let footer = Paragraph::new(
-        "Enter: search | ↑↓: select | Ctrl+O: open | Esc: close",
-    )
-    .style(Style::default().fg(Color::DarkGray));
+    let footer = Paragraph::new("Enter: search | ↑↓: select | Ctrl+O: open | Esc: close")
+        .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, chunks[3]);
 }

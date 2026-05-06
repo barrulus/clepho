@@ -262,7 +262,11 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Calculate dialog size - wider when in Faces view to accommodate preview
-    let base_width = if view_mode == PeopleViewMode::Faces { 100 } else { 70 };
+    let base_width = if view_mode == PeopleViewMode::Faces {
+        100
+    } else {
+        70
+    };
     let dialog_width = base_width.min(area.width.saturating_sub(4));
     let dialog_height = 30.min(area.height.saturating_sub(4));
 
@@ -300,12 +304,18 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Tab bar
     let people_style = if view_mode == PeopleViewMode::People {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::UNDERLINED)
     } else {
         Style::default().fg(Color::DarkGray)
     };
     let faces_style = if view_mode == PeopleViewMode::Faces {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::UNDERLINED)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -335,11 +345,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Name input (only visible in naming mode)
     if input_mode == InputMode::Naming {
-        let input_text = format!(
-            "{}|{}",
-            &name_input[..cursor],
-            &name_input[cursor..]
-        );
+        let input_text = format!("{}|{}", &name_input[..cursor], &name_input[cursor..]);
         let input = Paragraph::new(input_text)
             .style(Style::default().fg(Color::Yellow))
             .block(
@@ -368,15 +374,17 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_people_list(frame: &mut Frame, dialog: &PeopleDialog, area: Rect) {
     if dialog.people.is_empty() {
-        let empty = Paragraph::new("No named people yet.\nSwitch to Faces view (Tab) to name detected faces.")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" People ")
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            );
+        let empty = Paragraph::new(
+            "No named people yet.\nSwitch to Faces view (Tab) to name detected faces.",
+        )
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" People ")
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
         frame.render_widget(empty, area);
         return;
     }
@@ -386,9 +394,12 @@ fn render_people_list(frame: &mut Frame, dialog: &PeopleDialog, area: Rect) {
         .iter()
         .map(|person| {
             ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(&person.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                ]),
+                Line::from(vec![Span::styled(
+                    &person.name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )]),
                 Line::from(Span::styled(
                     format!("  {} photos", person.face_count),
                     Style::default().fg(Color::DarkGray),
@@ -424,21 +435,25 @@ fn render_faces_with_preview(frame: &mut Frame, app: &mut App, area: Rect) {
             d.faces.is_empty(),
             d.active_pane,
             d.selected_index,
-            d.faces.iter().map(|f| (f.photo_filename.clone(), f.face_id)).collect::<Vec<_>>(),
+            d.faces
+                .iter()
+                .map(|f| (f.photo_filename.clone(), f.face_id))
+                .collect::<Vec<_>>(),
         ),
         None => return,
     };
 
     if faces_empty {
-        let empty = Paragraph::new("No unassigned faces.\nRun face detection first (F key in browser).")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Unassigned Faces ")
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            );
+        let empty =
+            Paragraph::new("No unassigned faces.\nRun face detection first (F key in browser).")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Unassigned Faces ")
+                        .border_style(Style::default().fg(Color::DarkGray)),
+                );
         frame.render_widget(empty, area);
         return;
     }
@@ -469,9 +484,10 @@ fn render_faces_with_preview(frame: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .map(|(filename, face_id)| {
             ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(filename, Style::default().fg(Color::Yellow)),
-                ]),
+                Line::from(vec![Span::styled(
+                    filename,
+                    Style::default().fg(Color::Yellow),
+                )]),
                 Line::from(Span::styled(
                     format!("  Face #{}", face_id),
                     Style::default().fg(Color::DarkGray),
@@ -559,24 +575,31 @@ fn render_face_preview(frame: &mut Frame, app: &mut App, area: Rect, border_colo
     let thumbnail_size = app.config.preview.thumbnail_size;
 
     // Create a unique cache key for this face crop
-    let face_cache_key = std::path::PathBuf::from(format!(
-        "{}#face_{}",
-        path.display(),
-        face_id
-    ));
+    let face_cache_key = std::path::PathBuf::from(format!("{}#face_{}", path.display(), face_id));
 
     // Try to load the face crop (or start async loading)
-    if let Some(protocol) = app.image_preview.load_face_crop(&path, &bbox, face_id, thumbnail_size) {
+    if let Some(protocol) = app
+        .image_preview
+        .load_face_crop(&path, &bbox, face_id, thumbnail_size)
+    {
         let image = StatefulImage::new(None).resize(Resize::Fit(None));
         frame.render_stateful_widget(image, preview_chunks[0], protocol);
     } else if app.image_preview.is_loading_face(&face_cache_key) {
         let loading = Paragraph::new("Loading face...")
-            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+            .style(
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )
             .alignment(Alignment::Center);
         frame.render_widget(loading, preview_chunks[0]);
     } else {
         let loading = Paragraph::new("Preparing preview...")
-            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+            .style(
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )
             .alignment(Alignment::Center);
         frame.render_widget(loading, preview_chunks[0]);
     }

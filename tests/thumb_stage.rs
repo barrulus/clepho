@@ -6,7 +6,8 @@ use tempfile::tempdir;
 fn make_jpeg(path: &std::path::Path, w: u32, h: u32) {
     let img: image::ImageBuffer<image::Rgb<u8>, _> =
         image::ImageBuffer::from_fn(w, h, |x, y| image::Rgb([x as u8, y as u8, 0u8]));
-    img.save_with_format(path, image::ImageFormat::Jpeg).unwrap();
+    img.save_with_format(path, image::ImageFormat::Jpeg)
+        .unwrap();
 }
 
 #[test]

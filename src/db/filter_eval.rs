@@ -56,7 +56,11 @@ pub enum PlaceOp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PlaceValue {
-    WithinKm { lat: f64, lon: f64, km: f64 },
+    WithinKm {
+        lat: f64,
+        lon: f64,
+        km: f64,
+    },
     Bbox {
         min_lat: f64,
         min_lon: f64,
@@ -164,8 +168,7 @@ fn match_set(
 }
 
 fn eval_set(op: SetOp, values: &[String], actual: &[String]) -> bool {
-    let actual_set: std::collections::HashSet<&str> =
-        actual.iter().map(|s| s.as_str()).collect();
+    let actual_set: std::collections::HashSet<&str> = actual.iter().map(|s| s.as_str()).collect();
     match op {
         SetOp::AnyOf => values.iter().any(|v| actual_set.contains(v.as_str())),
         SetOp::AllOf => values.iter().all(|v| actual_set.contains(v.as_str())),
@@ -173,12 +176,7 @@ fn eval_set(op: SetOp, values: &[String], actual: &[String]) -> bool {
     }
 }
 
-fn match_place(
-    conn: &Connection,
-    photo_id: i64,
-    op: PlaceOp,
-    value: &PlaceValue,
-) -> Result<bool> {
+fn match_place(conn: &Connection, photo_id: i64, op: PlaceOp, value: &PlaceValue) -> Result<bool> {
     let coords: Option<(f64, f64)> = conn
         .query_row(
             "SELECT gps_lat, gps_lon FROM photos
@@ -222,12 +220,7 @@ fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     2.0 * r * a.sqrt().asin()
 }
 
-fn match_date(
-    conn: &Connection,
-    photo_id: i64,
-    op: DateOp,
-    value: &DateValue,
-) -> Result<bool> {
+fn match_date(conn: &Connection, photo_id: i64, op: DateOp, value: &DateValue) -> Result<bool> {
     let taken: Option<String> = conn
         .query_row(
             "SELECT taken_at FROM photos WHERE id=?1",
@@ -240,14 +233,14 @@ fn match_date(
         return Ok(false);
     };
 
-    let dt: chrono::DateTime<chrono::Utc> =
-        if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&t) {
-            d.with_timezone(&chrono::Utc)
-        } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&t, "%Y-%m-%d") {
-            d.and_hms_opt(0, 0, 0).unwrap().and_utc()
-        } else {
-            return Err(anyhow!("bad taken_at {}", t));
-        };
+    let dt: chrono::DateTime<chrono::Utc> = if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&t)
+    {
+        d.with_timezone(&chrono::Utc)
+    } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&t, "%Y-%m-%d") {
+        d.and_hms_opt(0, 0, 0).unwrap().and_utc()
+    } else {
+        return Err(anyhow!("bad taken_at {}", t));
+    };
 
     Ok(match (op, value) {
         (DateOp::Between, DateValue::Between { from, to }) => {
@@ -256,7 +249,9 @@ fn match_date(
             let d = dt.date_naive();
             d >= f && d <= to
         }
-        (DateOp::Year, DateValue::Year(y)) => dt.format("%Y").to_string().parse::<i32>().ok() == Some(*y),
+        (DateOp::Year, DateValue::Year(y)) => {
+            dt.format("%Y").to_string().parse::<i32>().ok() == Some(*y)
+        }
         (DateOp::Month, DateValue::YearMonth { year, month }) => {
             let yy = dt.format("%Y").to_string().parse::<i32>().ok();
             let mm = dt.format("%m").to_string().parse::<u32>().ok();

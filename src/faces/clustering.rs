@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
+use super::detector;
 use crate::db::Database;
 use crate::tasks::{TaskProgress, TaskUpdate};
-use super::detector;
 
 /// Result of face clustering
 #[derive(Debug, Clone)]
@@ -101,10 +101,7 @@ pub fn generate_missing_embeddings(db: &Database) -> Result<EmbeddingGenerationR
 /// 3. Find all faces within the similarity threshold
 /// 4. Add them to the cluster
 /// 5. Repeat until all faces are processed
-pub fn cluster_faces(
-    db: &Database,
-    similarity_threshold: f32,
-) -> Result<FaceClusteringResult> {
+pub fn cluster_faces(db: &Database, similarity_threshold: f32) -> Result<FaceClusteringResult> {
     // Clear existing clusters
     db.clear_face_clusters()?;
 
@@ -206,19 +203,20 @@ pub fn cluster_faces_background(
     }
 
     // Check total faces and faces without embeddings
-    let (total_faces_in_db, faces_needing_embeddings) = match (db.count_faces(), db.count_faces_without_embeddings()) {
-        (Ok(total), Ok(needing)) => (total as usize, needing as usize),
-        (Err(e), _) | (_, Err(e)) => {
-            let _ = tx.send(TaskUpdate::Failed {
-                error: format!("Failed to count faces: {}", e),
-            });
-            return;
-        }
-    };
+    let (total_faces_in_db, faces_needing_embeddings) =
+        match (db.count_faces(), db.count_faces_without_embeddings()) {
+            (Ok(total), Ok(needing)) => (total as usize, needing as usize),
+            (Err(e), _) | (_, Err(e)) => {
+                let _ = tx.send(TaskUpdate::Failed {
+                    error: format!("Failed to count faces: {}", e),
+                });
+                return;
+            }
+        };
 
     // Send initial progress
     let _ = tx.send(TaskUpdate::Started {
-        total: total_faces_in_db + faces_needing_embeddings
+        total: total_faces_in_db + faces_needing_embeddings,
     });
 
     let mut embeddings_generated = 0;
@@ -252,8 +250,11 @@ pub fn cluster_faces_background(
 
             // Send progress
             let _ = tx.send(TaskUpdate::Progress(
-                TaskProgress::new(idx, faces_needing_embeddings)
-                    .with_message(format!("Generating embedding {}/{}", idx + 1, faces_needing_embeddings))
+                TaskProgress::new(idx, faces_needing_embeddings).with_message(format!(
+                    "Generating embedding {}/{}",
+                    idx + 1,
+                    faces_needing_embeddings
+                )),
             ));
 
             let photo_path = match db.get_photo_path(*photo_id) {
@@ -314,8 +315,7 @@ pub fn cluster_faces_background(
 
     let total_faces = face_embeddings.len();
     let _ = tx.send(TaskUpdate::Progress(
-        TaskProgress::new(0, total_faces)
-            .with_message("Starting clustering...")
+        TaskProgress::new(0, total_faces).with_message("Starting clustering..."),
     ));
 
     let mut clustered: Vec<bool> = vec![false; total_faces];
@@ -335,8 +335,10 @@ pub fn cluster_faces_background(
 
         // Send progress
         let _ = tx.send(TaskUpdate::Progress(
-            TaskProgress::new(faces_clustered, total_faces)
-                .with_message(format!("Clustering faces... ({} clusters)", clusters_created))
+            TaskProgress::new(faces_clustered, total_faces).with_message(format!(
+                "Clustering faces... ({} clusters)",
+                clusters_created
+            )),
         ));
 
         let (face_id, ref embedding) = face_embeddings[i];
@@ -368,7 +370,10 @@ pub fn cluster_faces_background(
             let similarity = cosine_similarity(embedding, other_embedding);
 
             if similarity >= similarity_threshold {
-                if db.add_face_to_cluster(other_face_id, cluster_id, similarity).is_ok() {
+                if db
+                    .add_face_to_cluster(other_face_id, cluster_id, similarity)
+                    .is_ok()
+                {
                     clustered[j] = true;
                     faces_clustered += 1;
                 }
@@ -414,11 +419,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Merge multiple clusters into one
-pub fn merge_clusters(
-    db: &Database,
-    cluster_ids: &[i64],
-    new_name: Option<&str>,
-) -> Result<i64> {
+pub fn merge_clusters(db: &Database, cluster_ids: &[i64], new_name: Option<&str>) -> Result<i64> {
     if cluster_ids.is_empty() {
         anyhow::bail!("No clusters to merge");
     }

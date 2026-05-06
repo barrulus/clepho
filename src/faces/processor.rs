@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use crate::db::Database;
-use crate::tasks::{TaskUpdate, TaskProgress};
 use super::detector;
+use crate::db::Database;
+use crate::tasks::{TaskProgress, TaskUpdate};
 
 /// Face processor that detects and stores faces using dlib
 pub struct FaceProcessor {
@@ -17,7 +17,9 @@ impl FaceProcessor {
     /// Create a new face processor
     /// Note: Models are loaded lazily on first detection
     pub fn new() -> Self {
-        Self { _initialized: false }
+        Self {
+            _initialized: false,
+        }
     }
 
     /// Initialize face detection model only (fast - no embedding model)
@@ -44,12 +46,7 @@ impl FaceProcessor {
                 Some(face.embedding.as_slice())
             };
 
-            db.store_face(
-                photo_id,
-                &face.bbox,
-                embedding,
-                Some(face.confidence),
-            )?;
+            db.store_face(photo_id, &face.bbox, embedding, Some(face.confidence))?;
             faces_added += 1;
         }
 
@@ -71,7 +68,7 @@ impl FaceProcessor {
         // Initialize models if not already done
         if !self._initialized {
             let _ = tx.send(TaskUpdate::Progress(
-                TaskProgress::new(0, total).with_message("Loading face detection models...")
+                TaskProgress::new(0, total).with_message("Loading face detection models..."),
             ));
             if let Err(e) = self.init_models() {
                 let _ = tx.send(TaskUpdate::Failed {
@@ -97,7 +94,7 @@ impl FaceProcessor {
                 .unwrap_or_else(|| path.clone());
 
             let _ = tx.send(TaskUpdate::Progress(
-                TaskProgress::new(idx + 1, total).with_item(&filename)
+                TaskProgress::new(idx + 1, total).with_item(&filename),
             ));
 
             let image_path = Path::new(path);

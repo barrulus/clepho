@@ -89,10 +89,7 @@ impl Default for ScheduleManager {
 /// Execute a scheduled task by delegating to the appropriate task type.
 /// Note: The actual task execution is handled by the App, this just
 /// marks the task as running and returns the task info.
-pub fn mark_task_running(
-    task: &ScheduledTask,
-    db: &Database,
-) -> Result<(), String> {
+pub fn mark_task_running(task: &ScheduledTask, db: &Database) -> Result<(), String> {
     // Mark as running
     if let Err(e) = db.update_schedule_status(task.id, ScheduleStatus::Running, None) {
         return Err(format!("Failed to update status: {}", e));
@@ -101,10 +98,7 @@ pub fn mark_task_running(
 }
 
 /// Mark a scheduled task as completed.
-pub fn mark_task_completed(
-    task_id: i64,
-    db: &Database,
-) -> Result<(), String> {
+pub fn mark_task_completed(task_id: i64, db: &Database) -> Result<(), String> {
     if let Err(e) = db.update_schedule_status(task_id, ScheduleStatus::Completed, None) {
         return Err(format!("Failed to update status: {}", e));
     }
@@ -113,11 +107,7 @@ pub fn mark_task_completed(
 
 /// Mark a scheduled task as failed.
 #[allow(dead_code)]
-pub fn mark_task_failed(
-    task_id: i64,
-    db: &Database,
-    error: &str,
-) -> Result<(), String> {
+pub fn mark_task_failed(task_id: i64, db: &Database, error: &str) -> Result<(), String> {
     if let Err(e) = db.update_schedule_status(task_id, ScheduleStatus::Failed, Some(error)) {
         return Err(format!("Failed to update status: {}", e));
     }

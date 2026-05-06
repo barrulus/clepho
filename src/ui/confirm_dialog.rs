@@ -52,7 +52,15 @@ impl ConfirmDialog {
         } else {
             ConfirmFocus::Buttons
         };
-        Self { action, message, has_prompt_field, prompt_text, prompt_cursor, focus, original_prompt }
+        Self {
+            action,
+            message,
+            has_prompt_field,
+            prompt_text,
+            prompt_cursor,
+            focus,
+            original_prompt,
+        }
     }
 
     pub fn prompt_modified(&self) -> bool {
@@ -147,8 +155,8 @@ pub fn render(frame: &mut Frame, dialog: &ConfirmDialog, area: Rect) {
         frame.render_widget(message, chunks[0]);
 
         // Prompt label
-        let label = Paragraph::new("LLM Prompt (per-folder):")
-            .style(Style::default().fg(Color::Cyan));
+        let label =
+            Paragraph::new("LLM Prompt (per-folder):").style(Style::default().fg(Color::Cyan));
         frame.render_widget(label, chunks[1]);
 
         // Prompt input field
@@ -157,13 +165,13 @@ pub fn render(frame: &mut Frame, dialog: &ConfirmDialog, area: Rect) {
         } else {
             Style::default().fg(Color::Gray)
         };
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(if dialog.focus == ConfirmFocus::PromptField {
+        let input_block = Block::default().borders(Borders::ALL).border_style(
+            if dialog.focus == ConfirmFocus::PromptField {
                 Style::default().fg(Color::Cyan)
             } else {
                 Style::default().fg(Color::DarkGray)
-            });
+            },
+        );
 
         // Show the prompt text with cursor
         let inner = input_block.inner(chunks[2]);
@@ -244,10 +252,18 @@ pub fn render(frame: &mut Frame, dialog: &ConfirmDialog, area: Rect) {
 
         // Button hints
         let buttons = Line::from(vec![
-            Span::styled("  [Enter/y] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  [Enter/y] ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("Yes"),
             Span::raw("    "),
-            Span::styled("[Esc/n] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Esc/n] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("No"),
         ]);
         let button_widget = Paragraph::new(buttons).alignment(Alignment::Center);

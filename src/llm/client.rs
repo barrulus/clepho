@@ -3,8 +3,8 @@ use serde::Deserialize;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::config::LlmConfig;
 use super::provider::{create_provider, extract_json, LlmProvider};
+use crate::config::LlmConfig;
 
 /// Structured response from the LLM for image description and tagging
 #[derive(Debug, Deserialize)]
@@ -107,7 +107,9 @@ fn parse_tags_delimiter(response: &str) -> (String, Vec<String>) {
         if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("tags:") {
             let line_start = line.as_ptr() as usize - response.as_ptr() as usize;
             let prefix_offset = line.len() - trimmed.len();
-            trimmed.find(':').map(|colon| (line_start, prefix_offset + colon + 1))
+            trimmed
+                .find(':')
+                .map(|colon| (line_start, prefix_offset + colon + 1))
         } else {
             None
         }

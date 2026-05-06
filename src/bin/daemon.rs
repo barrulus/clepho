@@ -176,11 +176,11 @@ fn init_logging() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         if let Ok(journald_layer) = tracing_journald::layer() {
-            let subscriber = tracing_subscriber::registry()
-                .with(journald_layer)
-                .with(tracing_subscriber::filter::EnvFilter::new(
-                    std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())
-                ));
+            let subscriber = tracing_subscriber::registry().with(journald_layer).with(
+                tracing_subscriber::filter::EnvFilter::new(
+                    std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+                ),
+            );
             tracing::subscriber::set_global_default(subscriber)
                 .context("Failed to set tracing subscriber")?;
             return Ok(());
@@ -189,11 +189,9 @@ fn init_logging() -> Result<()> {
 
     // Fall back to stderr
     let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::filter::EnvFilter::new(
-                std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())
-            )
-        )
+        .with_env_filter(tracing_subscriber::filter::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+        ))
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)
@@ -204,14 +202,8 @@ fn init_logging() -> Result<()> {
 
 fn load_config(daemon_config: &DaemonConfig) -> Result<Config> {
     match &daemon_config.config_path {
-        Some(path) => {
-            Config::load_from(path)
-                .context("Failed to load config file")
-        }
-        None => {
-            Config::load()
-                .context("Failed to load config")
-        }
+        Some(path) => Config::load_from(path).context("Failed to load config file"),
+        None => Config::load().context("Failed to load config"),
     }
 }
 
@@ -335,20 +327,17 @@ fn build_scheduler(
         config.pipeline.allowed_extensions.clone(),
     ));
     let exif = Arc::new(ExifStage);
-    let thumb = Arc::new(ThumbStage::new(thumb_dir, config.pipeline.thumbnail_max_edge));
+    let thumb = Arc::new(ThumbStage::new(
+        thumb_dir,
+        config.pipeline.thumbnail_max_edge,
+    ));
     let llm = Arc::new(LlmStage {
         client: Arc::new(LlmClientAdapter(llm_client)),
         global_prompt_override: None,
     });
     let index = Arc::new(IndexStage);
 
-    let stages: Vec<Arc<dyn Stage>> = vec![
-        scan.clone(),
-        exif,
-        thumb,
-        llm,
-        index,
-    ];
+    let stages: Vec<Arc<dyn Stage>> = vec![scan.clone(), exif, thumb, llm, index];
 
     let breaker = Arc::new(CircuitBreaker::new(
         config.pipeline.circuit_breaker_threshold,
@@ -405,11 +394,7 @@ fn run_pipeline_pass(db: &Database, config: &Config) -> Result<()> {
             "{}: processed={} succeeded={} failed={} skipped_paused={}",
             f.path, report.processed, report.succeeded, report.failed, report.skipped_paused
         );
-        clepho::db::managed_folders::set_last_run(
-            conn,
-            &f.path,
-            &chrono::Utc::now().to_rfc3339(),
-        )?;
+        clepho::db::managed_folders::set_last_run(conn, &f.path, &chrono::Utc::now().to_rfc3339())?;
     }
     Ok(())
 }
@@ -482,11 +467,7 @@ fn run_pipeline_loop(db: &Database, config: &Config, poll_interval: u64) -> Resu
 }
 
 #[allow(dead_code)] // Replaced by run_pipeline_loop; deleted by Task 29.
-fn run_daemon_loop(
-    db: &Database,
-    config: &Config,
-    poll_interval: u64,
-) -> Result<()> {
+fn run_daemon_loop(db: &Database, config: &Config, poll_interval: u64) -> Result<()> {
     loop {
         // Check if we should process (based on hours of operation)
         if should_process_now(config) {
@@ -503,7 +484,10 @@ fn run_daemon_loop(
 }
 
 fn should_process_now(config: &Config) -> bool {
-    let (start, end) = match (config.schedule.default_hours_start, config.schedule.default_hours_end) {
+    let (start, end) = match (
+        config.schedule.default_hours_start,
+        config.schedule.default_hours_end,
+    ) {
         (Some(s), Some(e)) => (s, e),
         _ => return true, // No hours configured, always process
     };
@@ -604,7 +588,8 @@ fn execute_scan_task(target_path: &str, db: &Database) -> Result<()> {
         }
 
         let path = entry.path();
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase())
             .unwrap_or_default();
@@ -621,15 +606,15 @@ fn execute_scan_task(target_path: &str, db: &Database) -> Result<()> {
         }
 
         // Insert basic photo record
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        let directory = path.parent()
+        let directory = path
+            .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        let size = std::fs::metadata(path)
-            .map(|m| m.len() as i64)
-            .unwrap_or(0);
+        let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
 
         db.insert_basic_photo(&path_str, &filename, &directory, size)?;
 
@@ -640,20 +625,14 @@ fn execute_scan_task(target_path: &str, db: &Database) -> Result<()> {
     Ok(())
 }
 
-fn execute_llm_batch_task(
-    target_path: &str,
-    config: &Config,
-    db: &Database,
-) -> Result<()> {
+fn execute_llm_batch_task(target_path: &str, config: &Config, db: &Database) -> Result<()> {
     use clepho::llm::LlmClient;
     use std::path::Path;
 
     info!("Running LLM batch processing for: {}", target_path);
 
     // Look up per-folder prompt, falling back to global config
-    let dir_prompt = db.get_directory_prompt(target_path)
-        .ok()
-        .flatten();
+    let dir_prompt = db.get_directory_prompt(target_path).ok().flatten();
 
     // Get photos without descriptions in this directory
     let photos = db.get_photos_without_description_in_directory(target_path, 50)?;
@@ -698,7 +677,10 @@ fn execute_llm_batch_task(
                 warn!("Failed to generate description for {}: {}", path, e);
 
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                    error!("Aborting LLM batch: {} consecutive failures (server may be unavailable)", consecutive_failures);
+                    error!(
+                        "Aborting LLM batch: {} consecutive failures (server may be unavailable)",
+                        consecutive_failures
+                    );
                     break;
                 }
             }

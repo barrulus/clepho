@@ -7,9 +7,7 @@ use clepho::db::{apply_v2_schema, SystemClock};
 use clepho::pipeline::circuit_breaker::CircuitBreaker;
 use clepho::pipeline::log::JsonlAppender;
 use clepho::pipeline::scheduler::Scheduler;
-use clepho::pipeline::stages::{
-    pending_default, PendingPhoto, Stage, StageId, StageOutcome,
-};
+use clepho::pipeline::stages::{pending_default, PendingPhoto, Stage, StageId, StageOutcome};
 use rusqlite::Connection;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -186,7 +184,11 @@ fn paused_stage_skipped_other_stages_continue() {
     let report = sched.run_pass(&c, None).unwrap();
     assert!(report.skipped_paused >= 1, "Llm should have been skipped");
     // Exif still ran on the 5 pending photos.
-    assert!(report.succeeded >= 5, "exif should have processed the pending photos, got succeeded={}", report.succeeded);
+    assert!(
+        report.succeeded >= 5,
+        "exif should have processed the pending photos, got succeeded={}",
+        report.succeeded
+    );
 }
 
 #[test]

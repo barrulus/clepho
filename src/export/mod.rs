@@ -66,20 +66,23 @@ pub fn export_photos(db: &Database, output_path: &Path, format: ExportFormat) ->
 
 fn get_photos_for_export(db: &Database) -> Result<Vec<ExportedPhoto>> {
     let rows = db.get_photos_for_export()?;
-    Ok(rows.into_iter().map(|r| ExportedPhoto {
-        path: r.path,
-        filename: r.filename,
-        width: r.width,
-        height: r.height,
-        file_size: r.file_size,
-        sha256: r.sha256,
-        perceptual_hash: r.perceptual_hash,
-        camera_make: r.camera_make,
-        camera_model: r.camera_model,
-        date_taken: r.date_taken,
-        description: r.description,
-        scanned_at: r.scanned_at,
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| ExportedPhoto {
+            path: r.path,
+            filename: r.filename,
+            width: r.width,
+            height: r.height,
+            file_size: r.file_size,
+            sha256: r.sha256,
+            perceptual_hash: r.perceptual_hash,
+            camera_make: r.camera_make,
+            camera_model: r.camera_model,
+            date_taken: r.date_taken,
+            description: r.description,
+            scanned_at: r.scanned_at,
+        })
+        .collect())
 }
 
 fn export_json(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
@@ -134,7 +137,8 @@ fn export_html(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
     let mut html = String::new();
 
     // HTML header
-    html.push_str(r#"<!DOCTYPE html>
+    html.push_str(
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -218,7 +222,8 @@ fn export_html(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
 </head>
 <body>
     <h1>Clepho Photo Export</h1>
-"#);
+"#,
+    );
 
     // Stats section
     html.push_str(&format!(
@@ -230,12 +235,16 @@ fn export_html(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
     ));
 
     // Photo cards
-    html.push_str(r#"    <div class="photo-grid">
-"#);
+    html.push_str(
+        r#"    <div class="photo-grid">
+"#,
+    );
 
     for photo in photos {
-        html.push_str(r#"        <div class="photo-card">
-"#);
+        html.push_str(
+            r#"        <div class="photo-card">
+"#,
+        );
         html.push_str(&format!(
             r#"            <h3>{}</h3>
 "#,
@@ -246,8 +255,10 @@ fn export_html(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
 "#,
             html_escape(&photo.path)
         ));
-        html.push_str(r#"            <div class="metadata">
-"#);
+        html.push_str(
+            r#"            <div class="metadata">
+"#,
+        );
 
         if let (Some(w), Some(h)) = (photo.width, photo.height) {
             html.push_str(&format!(
@@ -283,8 +294,10 @@ fn export_html(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
             ));
         }
 
-        html.push_str(r#"            </div>
-"#);
+        html.push_str(
+            r#"            </div>
+"#,
+        );
 
         if let Some(ref desc) = photo.description {
             html.push_str(&format!(
@@ -294,14 +307,18 @@ fn export_html(photos: &[ExportedPhoto], output_path: &Path) -> Result<()> {
             ));
         }
 
-        html.push_str(r#"        </div>
-"#);
+        html.push_str(
+            r#"        </div>
+"#,
+        );
     }
 
-    html.push_str(r#"    </div>
+    html.push_str(
+        r#"    </div>
 </body>
 </html>
-"#);
+"#,
+    );
 
     let mut file = File::create(output_path)?;
     file.write_all(html.as_bytes())?;

@@ -1,6 +1,4 @@
-use clepho::db::{
-    apply_v2_schema, pipeline_write_facet, user_add_facet, FacetTable, FixedClock,
-};
+use clepho::db::{apply_v2_schema, pipeline_write_facet, user_add_facet, FacetTable, FixedClock};
 use clepho::pipeline::reprocess::{apply_reset, count_confirmed_values, count_user_values};
 use clepho::pipeline::stages::StageId;
 use rusqlite::Connection;

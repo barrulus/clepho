@@ -91,7 +91,13 @@ fn entry_to_list_item(entry: &DirEntry, show_size: bool, is_selected: bool) -> L
     let name = entry.name.clone();
 
     let text = if show_size && !entry.is_dir {
-        format!("{}{}{} {}", select_marker, icon, name, format_size(entry.size))
+        format!(
+            "{}{}{} {}",
+            select_marker,
+            icon,
+            name,
+            format_size(entry.size)
+        )
     } else {
         format!("{}{}{}", select_marker, icon, name)
     };

@@ -70,9 +70,9 @@ pub fn render(frame: &mut Frame, dialog: &TrashDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header with stats
-            Constraint::Min(0),     // File list
-            Constraint::Length(4),  // Help text
+            Constraint::Length(3), // Header with stats
+            Constraint::Min(0),    // File list
+            Constraint::Length(4), // Help text
         ])
         .split(dialog_area);
 
@@ -120,7 +120,9 @@ pub fn render(frame: &mut Frame, dialog: &TrashDialog, area: Rect) {
                 let date = format_date(&entry.trashed_at);
 
                 let style = if i == dialog.selected_index {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -161,8 +163,7 @@ pub fn render(frame: &mut Frame, dialog: &TrashDialog, area: Rect) {
         },
     ];
 
-    let help = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::TOP));
+    let help = Paragraph::new(help_text).block(Block::default().borders(Borders::TOP));
     frame.render_widget(help, chunks[2]);
 }
 

@@ -89,7 +89,13 @@ impl Scheduler {
                         message,
                     }) => {
                         let tripped = self.record_failure(
-                            conn, stage.id(), &photo, folder, &error_class, &message, elapsed,
+                            conn,
+                            stage.id(),
+                            &photo,
+                            folder,
+                            &error_class,
+                            &message,
+                            elapsed,
                         )?;
                         report.failed += 1;
                         if tripped {

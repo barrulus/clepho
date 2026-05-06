@@ -270,6 +270,7 @@ mod tests {
     fn schema_v2_is_idempotent() {
         let conn = Connection::open_in_memory().expect("open in-memory sqlite");
         conn.execute_batch(SCHEMA_V2).expect("first apply");
-        conn.execute_batch(SCHEMA_V2).expect("second apply must be a no-op");
+        conn.execute_batch(SCHEMA_V2)
+            .expect("second apply must be a no-op");
     }
 }

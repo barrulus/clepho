@@ -20,9 +20,9 @@ pub enum Actor {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FacetTable {
-    PhotoObjects,   // photo_objects
-    PhotoUserTags,  // photo_user_tags
-    Faces,          // faces (for Plan 2; included now for completeness)
+    PhotoObjects,  // photo_objects
+    PhotoUserTags, // photo_user_tags
+    Faces,         // faces (for Plan 2; included now for completeness)
 }
 
 impl FacetTable {

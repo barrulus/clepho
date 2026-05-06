@@ -18,14 +18,18 @@ impl Clock for SystemClock {
 pub struct FixedClock(DateTime<Utc>);
 
 impl FixedClock {
-    pub fn new(ts: DateTime<Utc>) -> Self { Self(ts) }
+    pub fn new(ts: DateTime<Utc>) -> Self {
+        Self(ts)
+    }
     pub fn iso(s: &str) -> Self {
         Self(DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc))
     }
 }
 
 impl Clock for FixedClock {
-    fn now(&self) -> DateTime<Utc> { self.0 }
+    fn now(&self) -> DateTime<Utc> {
+        self.0
+    }
 }
 
 #[cfg(test)]

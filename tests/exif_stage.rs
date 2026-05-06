@@ -31,12 +31,7 @@ fn exif_no_metadata_is_clean_negative() {
     let outcome = stage.process_one(&c, &pending[0], &SystemClock).unwrap();
     assert!(matches!(outcome, StageOutcome::Ok));
 
-    let (taken, lat, lon, err): (
-        Option<String>,
-        Option<f64>,
-        Option<f64>,
-        Option<String>,
-    ) = c
+    let (taken, lat, lon, err): (Option<String>, Option<f64>, Option<f64>, Option<String>) = c
         .query_row(
             "SELECT taken_at, gps_lat, gps_lon, exif_error FROM photos WHERE id=?1",
             rusqlite::params![pending[0].id],

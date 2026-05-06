@@ -136,11 +136,7 @@ fn index_skips_albums_with_invalid_filter_json() {
         .unwrap();
 
     let good_album: i64 = c
-        .query_row(
-            "SELECT id FROM albums WHERE name='Good'",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT id FROM albums WHERE name='Good'", [], |r| r.get(0))
         .unwrap();
     let cnt: i64 = c
         .query_row(

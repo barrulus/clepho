@@ -74,7 +74,11 @@ impl ChangesDialog {
     pub fn toggle_selection(&mut self) {
         let path = match self.tab {
             ChangesTab::New => self.changes.new_files.get(self.selected_index).cloned(),
-            ChangesTab::Modified => self.changes.modified_files.get(self.selected_index).cloned(),
+            ChangesTab::Modified => self
+                .changes
+                .modified_files
+                .get(self.selected_index)
+                .cloned(),
         };
 
         if let Some(path) = path {
@@ -166,7 +170,11 @@ pub fn render(frame: &mut Frame, dialog: &ChangesDialog, area: Rect) {
         )
         .select(selected_tab)
         .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
 
     frame.render_widget(tabs, chunks[0]);
 
@@ -195,7 +203,9 @@ pub fn render(frame: &mut Frame, dialog: &ChangesDialog, area: Rect) {
                 let marker = if selected { "[x]" } else { "[ ]" };
 
                 let style = if i == dialog.selected_index {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else if selected {
                     Style::default().fg(Color::Green)
                 } else {
@@ -206,14 +216,12 @@ pub fn render(frame: &mut Frame, dialog: &ChangesDialog, area: Rect) {
             })
             .collect();
 
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(match dialog.tab {
-                    ChangesTab::New => " New Files ",
-                    ChangesTab::Modified => " Modified Files ",
-                }),
-        );
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(
+            match dialog.tab {
+                ChangesTab::New => " New Files ",
+                ChangesTab::Modified => " Modified Files ",
+            },
+        ));
 
         let mut state = ListState::default();
         state.select(Some(dialog.selected_index));

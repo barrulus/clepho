@@ -166,8 +166,8 @@ mod tests {
         // Create an "old" file by writing it and backdating its mtime.
         let old_path = d.path().join("clepho-19990101.jsonl");
         std::fs::write(&old_path, "old\n").unwrap();
-        let old_time = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_secs(915_148_800); // 1999-01-01
+        let old_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(915_148_800); // 1999-01-01
         let f = std::fs::File::open(&old_path).unwrap();
         f.set_modified(old_time).unwrap();
 

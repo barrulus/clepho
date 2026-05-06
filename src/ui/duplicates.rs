@@ -6,7 +6,7 @@ use ratatui_image::{Resize, StatefulImage};
 use std::path::PathBuf;
 
 use crate::app::App;
-use crate::db::{PhotoRecord, SimilarityGroup, calculate_quality_score};
+use crate::db::{calculate_quality_score, PhotoRecord, SimilarityGroup};
 
 #[allow(dead_code)]
 pub struct DuplicatesView {
@@ -210,9 +210,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(25),  // Groups
-                Constraint::Percentage(40),  // Photos
-                Constraint::Percentage(35),  // Preview
+                Constraint::Percentage(25), // Groups
+                Constraint::Percentage(40), // Photos
+                Constraint::Percentage(35), // Preview
             ])
             .split(area);
 
@@ -263,19 +263,33 @@ fn render_group_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
         .take(end - start)
         .map(|(i, group)| {
             let marker = if i == view.current_group { ">" } else { " " };
-            let type_icon = if group.group_type == "exact" { "=" } else { "~" };
+            let type_icon = if group.group_type == "exact" {
+                "="
+            } else {
+                "~"
+            };
             let count = group.photos.len();
-            let marked = group.photos.iter().filter(|p| p.marked_for_deletion).count();
+            let marked = group
+                .photos
+                .iter()
+                .filter(|p| p.marked_for_deletion)
+                .count();
 
             let style = if i == view.current_group {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
             ListItem::new(format!(
                 "{} {} Grp {} ({}/{})",
-                marker, type_icon, i + 1, marked, count
+                marker,
+                type_icon,
+                i + 1,
+                marked,
+                count
             ))
             .style(style)
         })
@@ -314,7 +328,11 @@ fn render_photo_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
             .take(end - start)
             .map(|(i, photo)| {
                 let marker = if i == view.selected_photo { ">" } else { " " };
-                let del_marker = if photo.marked_for_deletion { "[D]" } else { "   " };
+                let del_marker = if photo.marked_for_deletion {
+                    "[D]"
+                } else {
+                    "   "
+                };
 
                 let dims = match (photo.width, photo.height) {
                     (Some(w), Some(h)) => format!("{}x{}", w, h),
@@ -327,7 +345,9 @@ fn render_photo_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
                     if photo.marked_for_deletion {
                         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
                     }
                 } else if photo.marked_for_deletion {
                     Style::default().fg(Color::Red)
@@ -345,7 +365,11 @@ fn render_photo_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
 
         let title = format!(
             " {} ({}) [Space=toggle, a=auto, A=auto-identical] ",
-            if group.group_type == "exact" { "Exact" } else { "Similar" },
+            if group.group_type == "exact" {
+                "Exact"
+            } else {
+                "Similar"
+            },
             group.photos.len()
         );
 
@@ -372,11 +396,7 @@ fn render_photo_list(frame: &mut Frame, view: &DuplicatesView, area: Rect) {
     } else {
         let msg = Paragraph::new("No duplicates found")
             .style(Style::default().fg(Color::DarkGray))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Photos "),
-            );
+            .block(Block::default().borders(Borders::ALL).title(" Photos "));
         frame.render_widget(msg, inner_chunks[0]);
     }
 }
@@ -410,7 +430,10 @@ fn render_preview(frame: &mut Frame, app: &mut App, area: Rect) {
     let thumbnail_size = app.config.preview.thumbnail_size;
     let rotation = app.get_photo_rotation(&photo_path);
 
-    if let Some(protocol) = app.image_preview.load_image(&photo_path, thumbnail_size, rotation) {
+    if let Some(protocol) = app
+        .image_preview
+        .load_image(&photo_path, thumbnail_size, rotation)
+    {
         let inner = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
@@ -434,15 +457,32 @@ fn render_preview(frame: &mut Frame, app: &mut App, area: Rect) {
             (Some(w), Some(h)) => format!("{}x{}", w, h),
             _ => "unknown".to_string(),
         };
-        let status = if photo.marked_for_deletion { "DELETE" } else { "KEEP" };
-        let status_color = if photo.marked_for_deletion { Color::Red } else { Color::Green };
+        let status = if photo.marked_for_deletion {
+            "DELETE"
+        } else {
+            "KEEP"
+        };
+        let status_color = if photo.marked_for_deletion {
+            Color::Red
+        } else {
+            Color::Green
+        };
 
         let info_lines = vec![
             Line::from(vec![
                 Span::raw("Status: "),
-                Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    status,
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]),
-            Line::from(format!("Size: {} | Dims: {}", format_size(photo.size_bytes as u64), dims)),
+            Line::from(format!(
+                "Size: {} | Dims: {}",
+                format_size(photo.size_bytes as u64),
+                dims
+            )),
             Line::from(format!("Quality score: {}", score)),
         ];
 
@@ -484,7 +524,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, dialog_area);
 
     let help_text = vec![
-        Line::from(Span::styled("Duplicates View", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Duplicates View",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  j/k/Up/Down      Move between photos"),
         Line::from("  J/K/Left/Right   Move between groups"),
@@ -501,7 +546,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  Esc              Exit (press u to return)"),
         Line::from("  ?                Toggle this help"),
         Line::from(""),
-        Line::from(Span::styled("Legend", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Legend",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from("  =        Exact duplicate (SHA256)"),
         Line::from("  ~        Perceptual similar"),
         Line::from("  [D]      Marked for deletion"),
@@ -571,14 +621,7 @@ fn is_copy_suffix(filename: &str) -> bool {
     }
 
     // Check for copy keywords
-    let copy_patterns = [
-        " copy",
-        "-copy",
-        "_copy",
-        "copy of ",
-        " - copy",
-        " (copy)",
-    ];
+    let copy_patterns = [" copy", "-copy", "_copy", "copy of ", " - copy", " (copy)"];
 
     for pattern in copy_patterns {
         if lower.contains(pattern) {

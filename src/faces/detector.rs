@@ -22,8 +22,8 @@ static EMBEDDING_MODEL: OnceLock<Mutex<Session>> = OnceLock::new();
 
 /// Get the models directory path
 fn get_models_dir() -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir()
-        .ok_or_else(|| anyhow!("Could not find local data directory"))?;
+    let data_dir =
+        dirs::data_local_dir().ok_or_else(|| anyhow!("Could not find local data directory"))?;
     let models_dir = data_dir.join("clepho").join("models");
     std::fs::create_dir_all(&models_dir)?;
     Ok(models_dir)
@@ -149,13 +149,17 @@ pub fn detect_faces_only(img: &DynamicImage) -> Result<Vec<DetectedFace>> {
 }
 
 /// Internal implementation with optional embedding generation
-fn detect_faces_in_image_impl(img: &DynamicImage, generate_embeddings: bool) -> Result<Vec<DetectedFace>> {
+fn detect_faces_in_image_impl(
+    img: &DynamicImage,
+    generate_embeddings: bool,
+) -> Result<Vec<DetectedFace>> {
     // Always need detection model
     if DETECTION_MODEL.get().is_none() {
         init_detection_model()?;
     }
 
-    let mut detection_model = DETECTION_MODEL.get()
+    let mut detection_model = DETECTION_MODEL
+        .get()
         .ok_or_else(|| anyhow!("Detection model not initialized"))?
         .lock()
         .map_err(|e| anyhow!("Failed to lock detection model: {}", e))?;
@@ -187,7 +191,8 @@ fn detect_faces_in_image_impl(img: &DynamicImage, generate_embeddings: bool) -> 
         init_embedding_model()?;
     }
 
-    let mut embedding_model = EMBEDDING_MODEL.get()
+    let mut embedding_model = EMBEDDING_MODEL
+        .get()
         .ok_or_else(|| anyhow!("Embedding model not initialized"))?
         .lock()
         .map_err(|e| anyhow!("Failed to lock embedding model: {}", e))?;
@@ -223,7 +228,10 @@ fn detect_faces_in_image_impl(img: &DynamicImage, generate_embeddings: bool) -> 
 }
 
 /// Run UltraFace detection model
-fn run_ultraface_detection(session: &mut Session, img: &DynamicImage) -> Result<Vec<(BoundingBox, f32)>> {
+fn run_ultraface_detection(
+    session: &mut Session,
+    img: &DynamicImage,
+) -> Result<Vec<(BoundingBox, f32)>> {
     const INPUT_WIDTH: u32 = 320;
     const INPUT_HEIGHT: u32 = 240;
     const CONFIDENCE_THRESHOLD: f32 = 0.7;
@@ -232,7 +240,11 @@ fn run_ultraface_detection(session: &mut Session, img: &DynamicImage) -> Result<
     let (orig_width, orig_height) = img.dimensions();
 
     // Resize image to model input size (use Triangle/bilinear for speed)
-    let resized = img.resize_exact(INPUT_WIDTH, INPUT_HEIGHT, image::imageops::FilterType::Triangle);
+    let resized = img.resize_exact(
+        INPUT_WIDTH,
+        INPUT_HEIGHT,
+        image::imageops::FilterType::Triangle,
+    );
     let rgb = resized.to_rgb8();
 
     // Convert to tensor (NCHW format, normalized)
@@ -243,21 +255,28 @@ fn run_ultraface_detection(session: &mut Session, img: &DynamicImage) -> Result<
             let pixel = rgb.get_pixel(x as u32, y as u32);
             let idx = y * INPUT_WIDTH as usize + x;
             input_data[idx] = (pixel[0] as f32 - 127.0) / 128.0; // R
-            input_data[INPUT_HEIGHT as usize * INPUT_WIDTH as usize + idx] = (pixel[1] as f32 - 127.0) / 128.0; // G
-            input_data[2 * INPUT_HEIGHT as usize * INPUT_WIDTH as usize + idx] = (pixel[2] as f32 - 127.0) / 128.0; // B
+            input_data[INPUT_HEIGHT as usize * INPUT_WIDTH as usize + idx] =
+                (pixel[1] as f32 - 127.0) / 128.0; // G
+            input_data[2 * INPUT_HEIGHT as usize * INPUT_WIDTH as usize + idx] =
+                (pixel[2] as f32 - 127.0) / 128.0; // B
         }
     }
 
     // Create tensor
-    let input_tensor = Tensor::from_array(([1usize, 3, INPUT_HEIGHT as usize, INPUT_WIDTH as usize], input_data.into_boxed_slice()))?;
+    let input_tensor = Tensor::from_array((
+        [1usize, 3, INPUT_HEIGHT as usize, INPUT_WIDTH as usize],
+        input_data.into_boxed_slice(),
+    ))?;
 
     // Run inference
     let outputs = session.run(ort::inputs!["input" => input_tensor])?;
 
     // Parse outputs - UltraFace outputs: scores and boxes
-    let scores_value = outputs.get("scores")
+    let scores_value = outputs
+        .get("scores")
         .ok_or_else(|| anyhow!("No scores output"))?;
-    let boxes_value = outputs.get("boxes")
+    let boxes_value = outputs
+        .get("boxes")
         .ok_or_else(|| anyhow!("No boxes output"))?;
 
     let (scores_shape, scores_data) = scores_value.try_extract_tensor::<f32>()?;
@@ -347,7 +366,12 @@ fn compute_iou(a: &BoundingBox, b: &BoundingBox) -> f32 {
 }
 
 /// Crop face region from image with padding
-fn crop_face(img: &DynamicImage, bbox: &BoundingBox, img_width: u32, img_height: u32) -> DynamicImage {
+fn crop_face(
+    img: &DynamicImage,
+    bbox: &BoundingBox,
+    img_width: u32,
+    img_height: u32,
+) -> DynamicImage {
     // Add 20% padding around the face
     let padding_x = (bbox.width as f32 * 0.2) as i32;
     let padding_y = (bbox.height as f32 * 0.2) as i32;
@@ -365,7 +389,11 @@ fn run_arcface_embedding(session: &mut Session, face_img: &DynamicImage) -> Resu
     const INPUT_SIZE: u32 = 112;
 
     // Resize to ArcFace input size (use Triangle/bilinear for speed)
-    let resized = face_img.resize_exact(INPUT_SIZE, INPUT_SIZE, image::imageops::FilterType::Triangle);
+    let resized = face_img.resize_exact(
+        INPUT_SIZE,
+        INPUT_SIZE,
+        image::imageops::FilterType::Triangle,
+    );
     let rgb = resized.to_rgb8();
 
     // Convert to tensor (NCHW format, normalized)
@@ -377,23 +405,29 @@ fn run_arcface_embedding(session: &mut Session, face_img: &DynamicImage) -> Resu
             let idx = y * INPUT_SIZE as usize + x;
             // ArcFace normalization: (pixel - 127.5) / 127.5
             input_data[idx] = (pixel[0] as f32 - 127.5) / 127.5;
-            input_data[INPUT_SIZE as usize * INPUT_SIZE as usize + idx] = (pixel[1] as f32 - 127.5) / 127.5;
-            input_data[2 * INPUT_SIZE as usize * INPUT_SIZE as usize + idx] = (pixel[2] as f32 - 127.5) / 127.5;
+            input_data[INPUT_SIZE as usize * INPUT_SIZE as usize + idx] =
+                (pixel[1] as f32 - 127.5) / 127.5;
+            input_data[2 * INPUT_SIZE as usize * INPUT_SIZE as usize + idx] =
+                (pixel[2] as f32 - 127.5) / 127.5;
         }
     }
 
     // Create tensor
-    let input_tensor = Tensor::from_array(([1usize, 3, INPUT_SIZE as usize, INPUT_SIZE as usize], input_data.into_boxed_slice()))?;
+    let input_tensor = Tensor::from_array((
+        [1usize, 3, INPUT_SIZE as usize, INPUT_SIZE as usize],
+        input_data.into_boxed_slice(),
+    ))?;
 
     // Run inference - ArcFace ONNX model uses "data" as input name
     let outputs = session.run(ort::inputs!["data" => input_tensor])?;
 
     // Get embedding output
-    let embedding_output = outputs.iter().next()
+    let embedding_output = outputs
+        .iter()
+        .next()
         .ok_or_else(|| anyhow!("No embedding output"))?;
 
-    let (_embedding_shape, embedding_data) = embedding_output.1
-        .try_extract_tensor::<f32>()?;
+    let (_embedding_shape, embedding_data) = embedding_output.1.try_extract_tensor::<f32>()?;
 
     // Normalize the embedding (L2 normalization)
     let embedding_vec: Vec<f32> = embedding_data.to_vec();
@@ -464,7 +498,8 @@ pub fn generate_embedding_for_face(image_path: &Path, bbox: &BoundingBox) -> Res
     let face_crop = crop_face(&img, bbox, orig_width, orig_height);
 
     // Get embedding model
-    let mut embedding_model = EMBEDDING_MODEL.get()
+    let mut embedding_model = EMBEDDING_MODEL
+        .get()
         .ok_or_else(|| anyhow!("Embedding model not initialized"))?
         .lock()
         .map_err(|e| anyhow!("Failed to lock embedding model: {}", e))?;
@@ -494,11 +529,26 @@ mod tests {
 
     #[test]
     fn test_iou() {
-        let a = BoundingBox { x: 0, y: 0, width: 10, height: 10 };
-        let b = BoundingBox { x: 0, y: 0, width: 10, height: 10 };
+        let a = BoundingBox {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        };
+        let b = BoundingBox {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        };
         assert!((compute_iou(&a, &b) - 1.0).abs() < 0.001);
 
-        let c = BoundingBox { x: 20, y: 20, width: 10, height: 10 };
+        let c = BoundingBox {
+            x: 20,
+            y: 20,
+            width: 10,
+            height: 10,
+        };
         assert!((compute_iou(&a, &c) - 0.0).abs() < 0.001);
     }
 }

@@ -1,16 +1,16 @@
 //! Slideshow mode with presenter view controls.
 
+use image::{imageops::FilterType, DynamicImage};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, Paragraph},
 };
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use ratatui_image::{Resize, StatefulImage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use image::{DynamicImage, imageops::FilterType};
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use crate::app::App;
 use crate::config::ImageProtocol;
@@ -196,7 +196,12 @@ impl SlideshowView {
 
     /// Load an image for display
     /// rotation_degrees: 0, 90, 180, or 270 degrees clockwise
-    pub fn load_image(&mut self, path: &PathBuf, max_size: u32, rotation_degrees: i32) -> Option<&mut StatefulProtocol> {
+    pub fn load_image(
+        &mut self,
+        path: &PathBuf,
+        max_size: u32,
+        rotation_degrees: i32,
+    ) -> Option<&mut StatefulProtocol> {
         self.poll_async_loads();
 
         let cache_key = Self::cache_key(path, rotation_degrees);
@@ -214,9 +219,10 @@ impl SlideshowView {
             let rotation = rotation_degrees;
 
             std::thread::spawn(move || {
-                if let Ok(img) = image::ImageReader::open(&path_clone)
-                    .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                {
+                if let Ok(img) = image::ImageReader::open(&path_clone).and_then(|r| {
+                    r.decode()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                }) {
                     let resized = img.resize(max_size, max_size, FilterType::Lanczos3);
                     // Apply rotation
                     let rotated = match rotation {
@@ -237,7 +243,9 @@ impl SlideshowView {
     /// Check if an image is currently loading
     pub fn is_loading(&self, path: &PathBuf) -> bool {
         // Check if any rotation variant is loading
-        self.loading.iter().any(|k| k.starts_with(&format!("{}#", path.display())))
+        self.loading
+            .iter()
+            .any(|k| k.starts_with(&format!("{}#", path.display())))
     }
 }
 
@@ -333,7 +341,12 @@ fn render_presenter(frame: &mut Frame, slideshow: &mut SlideshowView, db: &Datab
     render_status_bar(frame, slideshow, chunks[2]);
 }
 
-fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, db: &Database, area: Rect) {
+fn render_preview_strip(
+    frame: &mut Frame,
+    slideshow: &mut SlideshowView,
+    db: &Database,
+    area: Rect,
+) {
     // Three-column layout for prev/current/next
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -394,7 +407,11 @@ fn render_preview_strip(frame: &mut Frame, slideshow: &mut SlideshowView, db: &D
 }
 
 fn render_status_bar(frame: &mut Frame, slideshow: &SlideshowView, area: Rect) {
-    let play_status = if slideshow.playing { "▶ Playing" } else { "⏸ Paused" };
+    let play_status = if slideshow.playing {
+        "▶ Playing"
+    } else {
+        "⏸ Paused"
+    };
     let progress = format!("{}/{}", slideshow.current + 1, slideshow.images.len());
     let interval = format!("{}s", slideshow.interval);
     let mode = match slideshow.display_mode {
@@ -402,7 +419,8 @@ fn render_status_bar(frame: &mut Frame, slideshow: &SlideshowView, area: Rect) {
         SlideshowDisplayMode::Presenter => "Presenter",
     };
 
-    let filename = slideshow.current_image()
+    let filename = slideshow
+        .current_image()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -419,12 +437,10 @@ fn render_status_bar(frame: &mut Frame, slideshow: &SlideshowView, area: Rect) {
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(area);
 
-    let status = Paragraph::new(status_line)
-        .style(Style::default().fg(Color::Cyan));
+    let status = Paragraph::new(status_line).style(Style::default().fg(Color::Cyan));
     frame.render_widget(status, chunks[0]);
 
-    let help_text = Paragraph::new(help)
-        .style(Style::default().fg(Color::DarkGray));
+    let help_text = Paragraph::new(help).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(help_text, chunks[1]);
 }
 
@@ -447,7 +463,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, dialog_area);
 
     let help_text = vec![
-        Line::from(Span::styled("Slideshow Controls", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Slideshow Controls",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  Space          Play/Pause"),
         Line::from("  h/Left         Previous image"),

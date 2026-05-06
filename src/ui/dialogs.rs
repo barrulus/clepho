@@ -17,7 +17,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, dialog_area);
 
     let help_text = vec![
-        Line::from(Span::styled("Navigation", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  j / ↓      Move down"),
         Line::from("  k / ↑      Move up"),
@@ -29,13 +34,23 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  Ctrl+b     Page up"),
         Line::from("  ~          Go to home directory"),
         Line::from(""),
-        Line::from(Span::styled("Selection", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Selection",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  Space      Toggle file selection"),
         Line::from("  v / V      Enter visual mode (range select)"),
         Line::from("  Esc        Cancel running task / clear selection"),
         Line::from(""),
-        Line::from(Span::styled("Views", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Views",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  A          Open gallery view"),
         Line::from("  S          View image (slideshow)"),
@@ -45,7 +60,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  c          View recent changes"),
         Line::from("  @          Open schedule manager"),
         Line::from(""),
-        Line::from(Span::styled("Processing", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Processing",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  s          Scan current directory for photos"),
         Line::from("  u          Find duplicate photos"),
@@ -55,7 +75,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  C          Cluster similar faces together"),
         Line::from("  E          Generate CLIP embeddings"),
         Line::from(""),
-        Line::from(Span::styled("File Operations", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "File Operations",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  m          Move selected/current file(s)"),
         Line::from("  r          Rename selected/current file(s)"),
@@ -68,7 +93,12 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  [          Rotate photo counter-clockwise"),
         Line::from("  o          Open file in system viewer"),
         Line::from(""),
-        Line::from(Span::styled("Other", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Other",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
         Line::from("  /          Semantic search photos"),
         Line::from("  P          Manage people/faces"),
@@ -78,7 +108,10 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  ?          Show this help"),
         Line::from("  q          Quit"),
         Line::from(""),
-        Line::from(Span::styled("Press any key to close", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            "Press any key to close",
+            Style::default().fg(Color::DarkGray),
+        )),
     ];
 
     let paragraph = Paragraph::new(help_text)

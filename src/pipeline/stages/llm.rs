@@ -104,8 +104,8 @@ impl Stage for LlmStage {
         photo: &PendingPhoto,
         clock: &dyn Clock,
     ) -> Result<StageOutcome> {
-        let prompt = Self::folder_prompt(conn, &photo.path)
-            .or_else(|| self.global_prompt_override.clone());
+        let prompt =
+            Self::folder_prompt(conn, &photo.path).or_else(|| self.global_prompt_override.clone());
 
         let (description, tags) = match self
             .client
@@ -143,11 +143,10 @@ impl Stage for LlmStage {
                 "INSERT OR IGNORE INTO objects(name) VALUES (?1)",
                 params![tag],
             )?;
-            let object_id: i64 = tx.query_row(
-                "SELECT id FROM objects WHERE name=?1",
-                params![tag],
-                |r| r.get(0),
-            )?;
+            let object_id: i64 =
+                tx.query_row("SELECT id FROM objects WHERE name=?1", params![tag], |r| {
+                    r.get(0)
+                })?;
             pipeline_write_facet(
                 &tx,
                 FacetTable::PhotoObjects,

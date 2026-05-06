@@ -32,7 +32,10 @@ use config::Config;
 enum CliAction {
     RunTui(Option<PathBuf>),
     #[cfg(feature = "postgres")]
-    MigrateToPostgres { config_path: Option<PathBuf>, postgres_url: String },
+    MigrateToPostgres {
+        config_path: Option<PathBuf>,
+        postgres_url: String,
+    },
 }
 
 fn parse_args() -> CliAction {
@@ -88,7 +91,10 @@ fn parse_args() -> CliAction {
 
     #[cfg(feature = "postgres")]
     if let Some(url) = migrate_url {
-        return CliAction::MigrateToPostgres { config_path, postgres_url: url };
+        return CliAction::MigrateToPostgres {
+            config_path,
+            postgres_url: url,
+        };
     }
 
     CliAction::RunTui(config_path)
@@ -159,14 +165,20 @@ async fn main() -> Result<()> {
             result
         }
         #[cfg(feature = "postgres")]
-        CliAction::MigrateToPostgres { config_path, postgres_url } => {
+        CliAction::MigrateToPostgres {
+            config_path,
+            postgres_url,
+        } => {
             let config = match config_path {
                 Some(path) => Config::load_from(&path)?,
                 None => Config::load()?,
             };
 
             let sqlite_path = &config.database.sqlite_path;
-            eprintln!("Migrating from SQLite ({}) to PostgreSQL...", sqlite_path.display());
+            eprintln!(
+                "Migrating from SQLite ({}) to PostgreSQL...",
+                sqlite_path.display()
+            );
             db::migrate_postgres::migrate_sqlite_to_postgres(sqlite_path, &postgres_url)?;
             Ok(())
         }

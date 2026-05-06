@@ -1,15 +1,15 @@
 //! Gallery view for displaying photos in a grid layout.
 
+use image::{imageops::FilterType, DynamicImage};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, Paragraph},
 };
 use ratatui_image::StatefulImage;
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc;
-use image::{DynamicImage, imageops::FilterType};
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 
 use crate::app::App;
 use crate::config::ImageProtocol;
@@ -17,10 +17,10 @@ use crate::config::ImageProtocol;
 /// Thumbnail size options for gallery view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThumbnailSize {
-    Small,   // ~6 columns
+    Small, // ~6 columns
     #[default]
-    Medium,  // ~4 columns
-    Large,   // ~2 columns
+    Medium, // ~4 columns
+    Large, // ~2 columns
 }
 
 impl ThumbnailSize {
@@ -163,8 +163,8 @@ impl GalleryView {
             selected_indices: HashSet::new(),
             selection_mode: SelectionMode::Normal,
             visual_anchor: None,
-            cached_columns: 4,  // Default, updated on render
-            cached_visible_rows: 3,  // Default, updated on render
+            cached_columns: 4,      // Default, updated on render
+            cached_visible_rows: 3, // Default, updated on render
         }
     }
 
@@ -350,7 +350,11 @@ impl GalleryView {
 
     /// Load a thumbnail for the given path with rotation applied
     /// rotation_degrees: 0, 90, 180, or 270 degrees clockwise
-    pub fn load_thumbnail(&mut self, path: &PathBuf, rotation_degrees: i32) -> Option<&mut StatefulProtocol> {
+    pub fn load_thumbnail(
+        &mut self,
+        path: &PathBuf,
+        rotation_degrees: i32,
+    ) -> Option<&mut StatefulProtocol> {
         // Create cache key that includes rotation
         let cache_key = PathBuf::from(format!("{}#{}", path.display(), rotation_degrees));
 
@@ -368,9 +372,10 @@ impl GalleryView {
             let rotation = rotation_degrees;
 
             std::thread::spawn(move || {
-                if let Ok(img) = image::ImageReader::open(&path_clone)
-                    .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
-                {
+                if let Ok(img) = image::ImageReader::open(&path_clone).and_then(|r| {
+                    r.decode()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                }) {
                     let resized = img.resize(size, size, FilterType::Triangle);
                     // Apply rotation
                     let rotated = match rotation {
@@ -424,9 +429,8 @@ impl GalleryView {
     fn sort_images(&mut self) {
         match self.sort_by {
             SortOption::Name => {
-                self.images.sort_by(|a, b| {
-                    a.file_name().cmp(&b.file_name())
-                });
+                self.images
+                    .sort_by(|a, b| a.file_name().cmp(&b.file_name()));
             }
             SortOption::Date => {
                 self.images.sort_by(|a, b| {
@@ -583,9 +587,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // Header
-            Constraint::Min(10),    // Grid
-            Constraint::Length(2),  // Footer
+            Constraint::Length(1), // Header
+            Constraint::Min(10),   // Grid
+            Constraint::Length(2), // Footer
         ])
         .split(area);
 
@@ -600,7 +604,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_header(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
-    let dir_name = gallery.directory.file_name()
+    let dir_name = gallery
+        .directory
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| gallery.directory.to_string_lossy().to_string());
 
@@ -612,12 +618,22 @@ fn render_header(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
         gallery.thumbnail_size
     );
 
-    let paragraph = Paragraph::new(header)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    let paragraph = Paragraph::new(header).style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(paragraph, area);
 }
 
-fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, rotations: &std::collections::HashMap<std::path::PathBuf, i32>, area: Rect, columns: usize, visible_rows: usize) {
+fn render_grid(
+    frame: &mut Frame,
+    gallery: &mut GalleryView,
+    rotations: &std::collections::HashMap<std::path::PathBuf, i32>,
+    area: Rect,
+    columns: usize,
+    visible_rows: usize,
+) {
     let cell_width = gallery.thumbnail_size.cell_width();
     let cell_height = gallery.thumbnail_size.cell_height();
 
@@ -654,7 +670,15 @@ fn render_grid(frame: &mut Frame, gallery: &mut GalleryView, rotations: &std::co
                 let path = gallery.images[image_idx].clone();
                 // Use pre-computed rotation (cached to avoid per-frame DB queries)
                 let rotation = rotations.get(&path).copied().unwrap_or(0);
-                render_thumbnail_cell(frame, gallery, &path, *cell_area, is_cursor, is_selected, rotation);
+                render_thumbnail_cell(
+                    frame,
+                    gallery,
+                    &path,
+                    *cell_area,
+                    is_cursor,
+                    is_selected,
+                    rotation,
+                );
             }
         }
     }
@@ -672,13 +696,14 @@ fn render_thumbnail_cell(
     // Create block with selection highlighting
     // Cursor = current position (cyan), Selected = in selection set (green)
     let (border_color, border_type) = match (is_cursor, is_selected) {
-        (true, true) => (Color::Yellow, Borders::ALL),    // Cursor + Selected
-        (true, false) => (Color::Cyan, Borders::ALL),     // Cursor only
-        (false, true) => (Color::Green, Borders::ALL),    // Selected only
+        (true, true) => (Color::Yellow, Borders::ALL), // Cursor + Selected
+        (true, false) => (Color::Cyan, Borders::ALL),  // Cursor only
+        (false, true) => (Color::Green, Borders::ALL), // Selected only
         (false, false) => (Color::DarkGray, Borders::ALL), // Neither
     };
 
-    let filename = path.file_name()
+    let filename = path
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
@@ -712,7 +737,11 @@ fn render_thumbnail_cell(
     } else if gallery.is_loading(path, rotation_degrees) {
         // Show loading indicator
         let loading = Paragraph::new("Loading...")
-            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+            .style(
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )
             .alignment(Alignment::Center);
 
         // Center vertically
@@ -743,7 +772,8 @@ fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
     };
 
     let selected_info = if let Some(path) = gallery.selected_image() {
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         let size = std::fs::metadata(path)
@@ -754,7 +784,15 @@ fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
         } else {
             String::new()
         };
-        format!("{} ({}) | {}/{}{}{}", filename, size, gallery.selected + 1, gallery.images.len(), selection_str, mode_indicator)
+        format!(
+            "{} ({}) | {}/{}{}{}",
+            filename,
+            size,
+            gallery.selected + 1,
+            gallery.images.len(),
+            selection_str,
+            mode_indicator
+        )
     } else {
         "No selection".to_string()
     };
@@ -770,12 +808,10 @@ fn render_footer(frame: &mut Frame, gallery: &GalleryView, area: Rect) {
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(area);
 
-    let info = Paragraph::new(selected_info)
-        .style(Style::default().fg(Color::Yellow));
+    let info = Paragraph::new(selected_info).style(Style::default().fg(Color::Yellow));
     frame.render_widget(info, footer_chunks[0]);
 
-    let help_text = Paragraph::new(help)
-        .style(Style::default().fg(Color::DarkGray));
+    let help_text = Paragraph::new(help).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(help_text, footer_chunks[1]);
 }
 
@@ -808,9 +844,17 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, dialog_area);
 
     let help_text = vec![
-        Line::from(Span::styled("Gallery View", Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "Gallery View",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
+        )),
         Line::from(""),
-        Line::from(Span::styled("Navigation", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from("  h/Left           Move left"),
         Line::from("  l/Right          Move right"),
         Line::from("  k/Up             Move up"),
@@ -820,13 +864,19 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("  PgUp/Ctrl+B      Page up"),
         Line::from("  PgDn/Ctrl+F      Page down"),
         Line::from(""),
-        Line::from(Span::styled("Selection", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Selection",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from("  Space            Toggle select"),
         Line::from("  v / V            Visual select mode"),
         Line::from("  Ctrl+A           Select all"),
         Line::from("  Esc              Clear selection / Exit visual"),
         Line::from(""),
-        Line::from(Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Actions",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from("  ] / [            Rotate CW / CCW"),
         Line::from("  d / Delete       Move to trash"),
         Line::from("  y / x            Cut to clipboard"),

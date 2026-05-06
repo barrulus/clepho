@@ -31,10 +31,7 @@ fn pending_respects_prereq() {
         .unwrap();
     let stage = ExifStage;
     let pending = stage.pending(&c, None, 100).unwrap();
-    assert!(
-        pending.is_empty(),
-        "exif requires scan_done_at IS NOT NULL"
-    );
+    assert!(pending.is_empty(), "exif requires scan_done_at IS NOT NULL");
 }
 
 #[test]

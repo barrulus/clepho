@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use image::GenericImageView;
 use image::codecs::jpeg::JpegEncoder;
+use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::path::Path;
@@ -222,7 +222,9 @@ impl LlmProvider for OpenAICompatibleProvider {
         let data_url = format!("data:{};base64,{}", mime_type, base64_image);
 
         let response_format = if self.json_mode {
-            Some(ResponseFormat { format_type: "json_object".to_string() })
+            Some(ResponseFormat {
+                format_type: "json_object".to_string(),
+            })
         } else {
             None
         };
@@ -253,7 +255,10 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let url = format!("{}/chat/completions", self.endpoint);
 
-        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self
+            .agent
+            .post(&url)
+            .set("Content-Type", "application/json");
 
         if let Some(ref api_key) = self.api_key {
             req = req.set("Authorization", &format!("Bearer {}", api_key));
@@ -286,7 +291,10 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let url = format!("{}/embeddings", self.endpoint);
 
-        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self
+            .agent
+            .post(&url)
+            .set("Content-Type", "application/json");
 
         if let Some(ref api_key) = self.api_key {
             req = req.set("Authorization", &format!("Bearer {}", api_key));
@@ -341,7 +349,10 @@ impl LlmProvider for OpenAICompatibleProvider {
 
         let url = format!("{}/chat/completions", self.endpoint);
 
-        let mut req = self.agent.post(&url).set("Content-Type", "application/json");
+        let mut req = self
+            .agent
+            .post(&url)
+            .set("Content-Type", "application/json");
 
         if let Some(ref api_key) = self.api_key {
             req = req.set("Authorization", &format!("Bearer {}", api_key));
@@ -365,8 +376,13 @@ impl LlmProvider for OpenAICompatibleProvider {
         // Try to extract JSON from the response (handle markdown code blocks)
         let json_str = extract_json(&content);
 
-        let detection: FaceDetectionResponse = serde_json::from_str(&json_str)
-            .map_err(|e| anyhow!("Failed to parse face detection JSON: {} - Response was: {}", e, content))?;
+        let detection: FaceDetectionResponse = serde_json::from_str(&json_str).map_err(|e| {
+            anyhow!(
+                "Failed to parse face detection JSON: {} - Response was: {}",
+                e,
+                content
+            )
+        })?;
 
         Ok(detection)
     }
@@ -585,7 +601,9 @@ impl LlmProvider for AnthropicProvider {
             }],
         };
 
-        let response = self.agent.post("https://api.anthropic.com/v1/messages")
+        let response = self
+            .agent
+            .post("https://api.anthropic.com/v1/messages")
             .set("Content-Type", "application/json")
             .set("x-api-key", &self.api_key)
             .set("anthropic-version", "2023-06-01")
@@ -631,7 +649,9 @@ impl LlmProvider for AnthropicProvider {
             }],
         };
 
-        let response = self.agent.post("https://api.anthropic.com/v1/messages")
+        let response = self
+            .agent
+            .post("https://api.anthropic.com/v1/messages")
             .set("Content-Type", "application/json")
             .set("x-api-key", &self.api_key)
             .set("anthropic-version", "2023-06-01")
@@ -650,8 +670,13 @@ impl LlmProvider for AnthropicProvider {
 
         let json_str = extract_json(&content);
 
-        let detection: FaceDetectionResponse = serde_json::from_str(&json_str)
-            .map_err(|e| anyhow!("Failed to parse face detection JSON: {} - Response was: {}", e, content))?;
+        let detection: FaceDetectionResponse = serde_json::from_str(&json_str).map_err(|e| {
+            anyhow!(
+                "Failed to parse face detection JSON: {} - Response was: {}",
+                e,
+                content
+            )
+        })?;
 
         Ok(detection)
     }
@@ -768,7 +793,9 @@ impl LlmProvider for OllamaProvider {
 
         let url = format!("{}/api/generate", self.endpoint);
 
-        let response = self.agent.post(&url)
+        let response = self
+            .agent
+            .post(&url)
             .set("Content-Type", "application/json")
             .send_json(&request)
             .map_err(|e| anyhow!("Ollama request failed: {}", e))?;
@@ -792,7 +819,9 @@ impl LlmProvider for OllamaProvider {
 
         let url = format!("{}/api/embeddings", self.endpoint);
 
-        let response = self.agent.post(&url)
+        let response = self
+            .agent
+            .post(&url)
             .set("Content-Type", "application/json")
             .send_json(&request)
             .map_err(|e| anyhow!("Ollama embedding request failed: {}", e))?;
@@ -822,7 +851,9 @@ impl LlmProvider for OllamaProvider {
 
         let url = format!("{}/api/generate", self.endpoint);
 
-        let response = self.agent.post(&url)
+        let response = self
+            .agent
+            .post(&url)
             .set("Content-Type", "application/json")
             .send_json(&request)
             .map_err(|e| anyhow!("Ollama face detection request failed: {}", e))?;
@@ -833,8 +864,13 @@ impl LlmProvider for OllamaProvider {
 
         let json_str = extract_json(&ollama_response.response);
 
-        let detection: FaceDetectionResponse = serde_json::from_str(&json_str)
-            .map_err(|e| anyhow!("Failed to parse face detection JSON: {} - Response was: {}", e, ollama_response.response))?;
+        let detection: FaceDetectionResponse = serde_json::from_str(&json_str).map_err(|e| {
+            anyhow!(
+                "Failed to parse face detection JSON: {} - Response was: {}",
+                e,
+                ollama_response.response
+            )
+        })?;
 
         Ok(detection)
     }

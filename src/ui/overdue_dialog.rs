@@ -104,14 +104,17 @@ pub fn render(frame: &mut Frame, dialog: &OverdueDialog, area: Rect) {
         .split(dialog_area);
 
     // Header
-    let header = Paragraph::new(format!(" {} overdue scheduled tasks found", dialog.tasks.len()))
-        .style(Style::default().fg(Color::Red))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red))
-                .title(" Overdue Tasks "),
-        );
+    let header = Paragraph::new(format!(
+        " {} overdue scheduled tasks found",
+        dialog.tasks.len()
+    ))
+    .style(Style::default().fg(Color::Red))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title(" Overdue Tasks "),
+    );
     frame.render_widget(header, chunks[0]);
 
     // Task list
@@ -130,7 +133,9 @@ pub fn render(frame: &mut Frame, dialog: &OverdueDialog, area: Rect) {
                 let marker = if selected { "[x]" } else { "[ ]" };
 
                 let style = if i == dialog.selected_index {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else if selected {
                     Style::default().fg(Color::Green)
                 } else {
@@ -150,15 +155,12 @@ pub fn render(frame: &mut Frame, dialog: &OverdueDialog, area: Rect) {
                     task.task_type.display_name(),
                     scheduled,
                     truncate_path(&task.target_path, 30)
-                )).style(style)
+                ))
+                .style(style)
             })
             .collect();
 
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Tasks "),
-        );
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" Tasks "));
 
         let mut state = ListState::default();
         state.select(Some(dialog.selected_index));

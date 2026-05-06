@@ -89,7 +89,9 @@ impl ReprocessDialog {
             cancel_cur, confirm_cur
         )));
 
-        let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+        let p = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false });
         f.render_widget(p, area);
     }
 

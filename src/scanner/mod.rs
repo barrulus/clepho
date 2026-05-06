@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::db::Database;
-use crate::tasks::{TaskUpdate, TaskProgress};
+use crate::tasks::{TaskProgress, TaskUpdate};
 
 pub use change_detection::{detect_changes, ChangeDetectionResult};
 pub use discovery::discover_images;
@@ -42,7 +42,10 @@ pub struct Scanner {
 impl Scanner {
     pub fn new(config: Config) -> Self {
         let thumbnail_manager = ThumbnailManager::new(&config.thumbnails);
-        Self { config, thumbnail_manager }
+        Self {
+            config,
+            thumbnail_manager,
+        }
     }
 
     /// Scan directory with cancellation support via TaskUpdate protocol.
@@ -93,11 +96,12 @@ impl Scanner {
 
                 // Update progress
                 let current = progress_clone.fetch_add(1, Ordering::SeqCst) + 1;
-                let filename = path.file_name()
+                let filename = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 let _ = tx_clone.send(TaskUpdate::Progress(
-                    TaskProgress::new(current, total).with_item(&filename)
+                    TaskProgress::new(current, total).with_item(&filename),
                 ));
 
                 // Scan the file (expensive operation - done in parallel)
@@ -119,29 +123,27 @@ impl Scanner {
 
         for (path, result) in scanned_photos {
             match result {
-                Ok(photo) => {
-                    match db.photo_exists(&path) {
-                        Ok(exists) => {
-                            if exists {
-                                if let Err(e) = self.update_photo(db, &photo) {
-                                    tracing::error!(path = %path.display(), error = %e, "Error updating photo");
-                                } else {
-                                    updated_count += 1;
-                                }
+                Ok(photo) => match db.photo_exists(&path) {
+                    Ok(exists) => {
+                        if exists {
+                            if let Err(e) = self.update_photo(db, &photo) {
+                                tracing::error!(path = %path.display(), error = %e, "Error updating photo");
                             } else {
-                                if let Err(e) = self.insert_photo(db, &photo) {
-                                    tracing::error!(path = %path.display(), error = %e, "Error inserting photo");
-                                } else {
-                                    new_count += 1;
-                                }
+                                updated_count += 1;
                             }
-                            scanned += 1;
+                        } else {
+                            if let Err(e) = self.insert_photo(db, &photo) {
+                                tracing::error!(path = %path.display(), error = %e, "Error inserting photo");
+                            } else {
+                                new_count += 1;
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!(path = %path.display(), error = %e, "Error checking photo existence");
-                        }
+                        scanned += 1;
                     }
-                }
+                    Err(e) => {
+                        tracing::error!(path = %path.display(), error = %e, "Error checking photo existence");
+                    }
+                },
                 Err(e) => {
                     if !e.to_string().contains("Cancelled") {
                         tracing::error!(path = %path.display(), error = %e, "Error scanning photo");
@@ -151,7 +153,10 @@ impl Scanner {
         }
 
         let _ = tx.send(TaskUpdate::Completed {
-            message: format!("{} scanned, {} new, {} updated", scanned, new_count, updated_count),
+            message: format!(
+                "{} scanned, {} new, {} updated",
+                scanned, new_count, updated_count
+            ),
         });
     }
 
@@ -167,13 +172,10 @@ impl Scanner {
             .unwrap_or_default();
 
         // Get file modification time as ISO timestamp
-        let modified_at = file_metadata
-            .modified()
-            .ok()
-            .and_then(|t| {
-                let datetime: chrono::DateTime<chrono::Utc> = t.into();
-                Some(datetime.format("%Y-%m-%dT%H:%M:%S").to_string())
-            });
+        let modified_at = file_metadata.modified().ok().and_then(|t| {
+            let datetime: chrono::DateTime<chrono::Utc> = t.into();
+            Some(datetime.format("%Y-%m-%dT%H:%M:%S").to_string())
+        });
 
         // Extract image metadata (EXIF, dimensions)
         let metadata = metadata::extract_metadata(path).ok();
@@ -208,28 +210,46 @@ impl Scanner {
     fn insert_photo(&self, db: &Database, photo: &ScannedPhoto) -> Result<()> {
         let path_str = photo.path.to_string_lossy();
 
-        let (width, height, format, camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at, gps_lat, gps_lon, all_exif, orientation) =
-            if let Some(ref meta) = photo.metadata {
-                (
-                    meta.width,
-                    meta.height,
-                    meta.format.as_deref(),
-                    meta.camera_make.as_deref(),
-                    meta.camera_model.as_deref(),
-                    meta.lens.as_deref(),
-                    meta.focal_length,
-                    meta.aperture,
-                    meta.shutter_speed.as_deref(),
-                    meta.iso,
-                    meta.taken_at.as_deref(),
-                    meta.gps_latitude,
-                    meta.gps_longitude,
-                    meta.all_exif.as_deref(),
-                    meta.orientation,
-                )
-            } else {
-                (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
-            };
+        let (
+            width,
+            height,
+            format,
+            camera_make,
+            camera_model,
+            lens,
+            focal_length,
+            aperture,
+            shutter_speed,
+            iso,
+            taken_at,
+            gps_lat,
+            gps_lon,
+            all_exif,
+            orientation,
+        ) = if let Some(ref meta) = photo.metadata {
+            (
+                meta.width,
+                meta.height,
+                meta.format.as_deref(),
+                meta.camera_make.as_deref(),
+                meta.camera_model.as_deref(),
+                meta.lens.as_deref(),
+                meta.focal_length,
+                meta.aperture,
+                meta.shutter_speed.as_deref(),
+                meta.iso,
+                meta.taken_at.as_deref(),
+                meta.gps_latitude,
+                meta.gps_longitude,
+                meta.all_exif.as_deref(),
+                meta.orientation,
+            )
+        } else {
+            (
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None,
+            )
+        };
 
         let (md5_hash, sha256_hash, perceptual_hash) = if let Some(ref hashes) = photo.hashes {
             (
@@ -247,10 +267,23 @@ impl Scanner {
             &photo.directory,
             photo.size_bytes as i64,
             photo.modified_at.as_deref(),
-            width, height, format,
-            camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso.map(|v| v as i64), taken_at,
-            gps_lat, gps_lon, all_exif,
-            md5_hash, sha256_hash, perceptual_hash,
+            width,
+            height,
+            format,
+            camera_make,
+            camera_model,
+            lens,
+            focal_length,
+            aperture,
+            shutter_speed,
+            iso.map(|v| v as i64),
+            taken_at,
+            gps_lat,
+            gps_lon,
+            all_exif,
+            md5_hash,
+            sha256_hash,
+            perceptual_hash,
             orientation.unwrap_or(1) as i32,
         )
     }
@@ -258,28 +291,46 @@ impl Scanner {
     fn update_photo(&self, db: &Database, photo: &ScannedPhoto) -> Result<()> {
         let path_str = photo.path.to_string_lossy();
 
-        let (width, height, format, camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso, taken_at, gps_lat, gps_lon, all_exif, orientation) =
-            if let Some(ref meta) = photo.metadata {
-                (
-                    meta.width,
-                    meta.height,
-                    meta.format.as_deref(),
-                    meta.camera_make.as_deref(),
-                    meta.camera_model.as_deref(),
-                    meta.lens.as_deref(),
-                    meta.focal_length,
-                    meta.aperture,
-                    meta.shutter_speed.as_deref(),
-                    meta.iso,
-                    meta.taken_at.as_deref(),
-                    meta.gps_latitude,
-                    meta.gps_longitude,
-                    meta.all_exif.as_deref(),
-                    meta.orientation,
-                )
-            } else {
-                (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
-            };
+        let (
+            width,
+            height,
+            format,
+            camera_make,
+            camera_model,
+            lens,
+            focal_length,
+            aperture,
+            shutter_speed,
+            iso,
+            taken_at,
+            gps_lat,
+            gps_lon,
+            all_exif,
+            orientation,
+        ) = if let Some(ref meta) = photo.metadata {
+            (
+                meta.width,
+                meta.height,
+                meta.format.as_deref(),
+                meta.camera_make.as_deref(),
+                meta.camera_model.as_deref(),
+                meta.lens.as_deref(),
+                meta.focal_length,
+                meta.aperture,
+                meta.shutter_speed.as_deref(),
+                meta.iso,
+                meta.taken_at.as_deref(),
+                meta.gps_latitude,
+                meta.gps_longitude,
+                meta.all_exif.as_deref(),
+                meta.orientation,
+            )
+        } else {
+            (
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None,
+            )
+        };
 
         let (md5_hash, sha256_hash, perceptual_hash) = if let Some(ref hashes) = photo.hashes {
             (
@@ -297,10 +348,23 @@ impl Scanner {
             &photo.directory,
             photo.size_bytes as i64,
             photo.modified_at.as_deref(),
-            width, height, format,
-            camera_make, camera_model, lens, focal_length, aperture, shutter_speed, iso.map(|v| v as i64), taken_at,
-            gps_lat, gps_lon, all_exif,
-            md5_hash, sha256_hash, perceptual_hash,
+            width,
+            height,
+            format,
+            camera_make,
+            camera_model,
+            lens,
+            focal_length,
+            aperture,
+            shutter_speed,
+            iso.map(|v| v as i64),
+            taken_at,
+            gps_lat,
+            gps_lon,
+            all_exif,
+            md5_hash,
+            sha256_hash,
+            perceptual_hash,
             orientation.unwrap_or(1) as i32,
         )
     }

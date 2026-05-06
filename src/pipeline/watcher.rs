@@ -16,15 +16,16 @@ pub struct FolderWatcher {
 impl FolderWatcher {
     pub fn watch(roots: Vec<PathBuf>) -> Result<Self> {
         let (tx, rx) = mpsc::channel::<PathBuf>();
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(ev) = res {
-                if matches!(ev.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-                    for p in ev.paths {
-                        let _ = tx.send(p);
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(ev) = res {
+                    if matches!(ev.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+                        for p in ev.paths {
+                            let _ = tx.send(p);
+                        }
                     }
                 }
-            }
-        })?;
+            })?;
         for root in &roots {
             watcher.watch(root, RecursiveMode::Recursive)?;
         }

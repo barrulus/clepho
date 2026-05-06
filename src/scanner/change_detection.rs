@@ -122,8 +122,7 @@ pub fn detect_changes(
 /// Handles the ISO 8601 format used by the scanner: "YYYY-MM-DDTHH:MM:SS"
 fn parse_db_timestamp(timestamp: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
     // Try parsing with the format we store (no timezone suffix)
-    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S")
-        .map(|dt| dt.and_utc())
+    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S").map(|dt| dt.and_utc())
 }
 
 #[cfg(test)]

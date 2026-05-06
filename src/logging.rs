@@ -19,8 +19,8 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 /// - `CLEPHO_LOG=warn` for warnings and errors only
 /// - `CLEPHO_LOG=error` for errors only
 pub fn init(log_dir: Option<PathBuf>) -> Result<()> {
-    let env_filter = EnvFilter::try_from_env("CLEPHO_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter =
+        EnvFilter::try_from_env("CLEPHO_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
 
     #[cfg(target_os = "linux")]
     {
@@ -51,7 +51,8 @@ pub fn init(log_dir: Option<PathBuf>) -> Result<()> {
 
     // Store the guard in a static to prevent it from being dropped
     // This is safe because we only call init() once at startup
-    static GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> = std::sync::OnceLock::new();
+    static GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+        std::sync::OnceLock::new();
     let _ = GUARD.set(_guard);
 
     tracing_subscriber::registry()

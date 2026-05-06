@@ -69,10 +69,7 @@ fn setup_db_with_pending() -> (Connection, i64) {
 #[test]
 fn llm_stage_writes_description_and_objects_with_ai_provenance() {
     let (c, id) = setup_db_with_pending();
-    let mock = Arc::new(MockLlm::new(
-        "A sunset over Rome",
-        vec!["sunset", "rome"],
-    ));
+    let mock = Arc::new(MockLlm::new("A sunset over Rome", vec!["sunset", "rome"]));
     let stage = LlmStage {
         client: mock.clone(),
         global_prompt_override: None,

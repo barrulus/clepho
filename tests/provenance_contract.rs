@@ -2,8 +2,8 @@
 //! If any cell of this matrix is wrong, the whole alignment effort breaks.
 
 use clepho::db::{
-    apply_v2_schema, pipeline_write_facet, user_add_facet, user_confirm_facet,
-    user_reject_facet, user_remove_facet, FacetTable, FixedClock, WriteOutcome,
+    apply_v2_schema, pipeline_write_facet, user_add_facet, user_confirm_facet, user_reject_facet,
+    user_remove_facet, FacetTable, FixedClock, WriteOutcome,
 };
 use rusqlite::Connection;
 
@@ -139,7 +139,9 @@ fn user_remove_does_not_record_rejection() {
     user_remove_facet(&c, FacetTable::PhotoObjects, 1, 1).unwrap();
 
     let rejected_count: i64 = c
-        .query_row("SELECT COUNT(*) FROM rejected_suggestions", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM rejected_suggestions", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(rejected_count, 0);
 

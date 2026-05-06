@@ -16,23 +16,23 @@ use crate::schedule::ScheduleManager;
 use crate::tasks::{BackgroundTaskManager, TaskType, TaskUpdate};
 use crate::trash::TrashManager;
 use crate::ui;
+use crate::ui::centralise_dialog::{CentraliseDialog, CentraliseDialogMode};
 use crate::ui::changes_dialog::ChangesDialog;
+use crate::ui::confirm_dialog::ConfirmDialog;
 use crate::ui::duplicates::DuplicatesView;
+use crate::ui::edit_dialog::EditDescriptionDialog;
 use crate::ui::export_dialog::ExportDialog;
+use crate::ui::gallery::GalleryView;
 use crate::ui::move_dialog::MoveDialog;
 use crate::ui::overdue_dialog::OverdueDialog;
+use crate::ui::people_dialog::PeopleDialog;
 use crate::ui::preview::ImagePreviewState;
 use crate::ui::rename_dialog::RenameDialog;
 use crate::ui::schedule_dialog::ScheduleDialog;
 use crate::ui::search_dialog::SearchDialog;
-use crate::ui::people_dialog::PeopleDialog;
-use crate::ui::trash_dialog::TrashDialog;
-use crate::ui::edit_dialog::EditDescriptionDialog;
-use crate::ui::gallery::GalleryView;
-use crate::ui::tag_dialog::{TagDialog, TagDialogMode};
 use crate::ui::slideshow::SlideshowView;
-use crate::ui::centralise_dialog::{CentraliseDialog, CentraliseDialogMode};
-use crate::ui::confirm_dialog::ConfirmDialog;
+use crate::ui::tag_dialog::{TagDialog, TagDialogMode};
+use crate::ui::trash_dialog::TrashDialog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -171,7 +171,8 @@ impl App {
         let llm_client = LlmClient::from_config(&config.llm);
         let image_preview = ImagePreviewState::new(config.preview.protocol, &config.thumbnails);
         let trash_manager = TrashManager::new(config.trash.clone());
-        let duplicate_trash_manager = TrashManager::new_from_duplicate_config(config.duplicate_trash.clone());
+        let duplicate_trash_manager =
+            TrashManager::new_from_duplicate_config(config.duplicate_trash.clone());
         let action_map = config.keybindings.build_action_map();
         // Extract view settings before moving config
         let show_hidden = config.view.show_hidden;
@@ -292,7 +293,10 @@ impl App {
 
     fn read_directory(&self, path: &PathBuf) -> Result<Vec<DirEntry>> {
         let mut entries = Vec::new();
-        let supported_extensions: Vec<String> = self.config.scanner.image_extensions
+        let supported_extensions: Vec<String> = self
+            .config
+            .scanner
+            .image_extensions
             .iter()
             .map(|e| e.to_lowercase())
             .collect();
@@ -311,7 +315,8 @@ impl App {
 
                 // Filter non-image files (unless show_all_files is enabled)
                 if !self.show_all_files && !is_dir {
-                    let ext = entry.path()
+                    let ext = entry
+                        .path()
                         .extension()
                         .map(|e| e.to_string_lossy().to_lowercase())
                         .unwrap_or_default();
@@ -339,7 +344,10 @@ impl App {
         Ok(entries)
     }
 
-    pub async fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
+    pub async fn run(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    ) -> Result<()> {
         while !self.should_quit {
             // Poll for task updates and handle completions
             let completions = self.task_manager.poll_updates();
@@ -349,7 +357,14 @@ impl App {
                     self.status_message = Some(format!("{}: {}", prefix, completion.message));
 
                     // Clear metadata cache after scan completes so preview shows fresh data
-                    if matches!(completion.task_type, TaskType::Scan | TaskType::LlmSingle | TaskType::LlmBatch | TaskType::FaceDetection | TaskType::FaceClustering) {
+                    if matches!(
+                        completion.task_type,
+                        TaskType::Scan
+                            | TaskType::LlmSingle
+                            | TaskType::LlmBatch
+                            | TaskType::FaceDetection
+                            | TaskType::FaceClustering
+                    ) {
                         self.image_preview.metadata_cache.clear();
                     }
 
@@ -401,7 +416,9 @@ impl App {
                         let size = terminal.size()?;
                         let area = Rect::new(0, 0, size.width, size.height);
                         match self.mode {
-                            AppMode::PeopleManaging => self.handle_people_dialog_mouse(mouse, area)?,
+                            AppMode::PeopleManaging => {
+                                self.handle_people_dialog_mouse(mouse, area)?
+                            }
                             AppMode::Duplicates => self.handle_duplicates_mouse(mouse, area)?,
                             AppMode::Normal => self.handle_mouse(mouse, area)?,
                             _ => {} // Other modes don't have mouse support yet
@@ -655,9 +672,7 @@ impl App {
 
         // Spec §4.6: R / Shift+R / M for pipeline run / reprocess / manage.
         // Hardcoded — these are part of the v2 spec, not user-customizable.
-        if key.code == KeyCode::Char('R')
-            && !key.modifiers.contains(KeyModifiers::SHIFT)
-        {
+        if key.code == KeyCode::Char('R') && !key.modifiers.contains(KeyModifiers::SHIFT) {
             self.spawn_ad_hoc_run();
             return Ok(());
         }
@@ -703,8 +718,12 @@ impl App {
             Action::EnterVisualMode => self.enter_visual_mode(),
 
             // Actions requiring confirmation
-            Action::Scan | Action::DescribeWithLlm | Action::BatchLlm |
-            Action::DetectFaces | Action::ClusterFaces | Action::ClipEmbedding => {
+            Action::Scan
+            | Action::DescribeWithLlm
+            | Action::BatchLlm
+            | Action::DetectFaces
+            | Action::ClusterFaces
+            | Action::ClipEmbedding => {
                 self.show_confirmation(action);
             }
             Action::FindDuplicates => self.find_duplicates()?,
@@ -752,8 +771,10 @@ impl App {
 
         // Determine which pane the mouse is in
         let in_parent_pane = x < chunks[0].right() && y >= chunks[0].y && y < chunks[0].bottom();
-        let in_current_pane = x >= chunks[1].x && x < chunks[1].right() && y >= chunks[1].y && y < chunks[1].bottom();
-        let in_preview_pane = x >= chunks[2].x && x < chunks[2].right() && y >= chunks[2].y && y < chunks[2].bottom();
+        let in_current_pane =
+            x >= chunks[1].x && x < chunks[1].right() && y >= chunks[1].y && y < chunks[1].bottom();
+        let in_preview_pane =
+            x >= chunks[2].x && x < chunks[2].right() && y >= chunks[2].y && y < chunks[2].bottom();
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
@@ -829,7 +850,11 @@ impl App {
         }
 
         // Calculate dialog dimensions (matching render logic in people_dialog.rs)
-        let base_width = if dialog.view_mode == PeopleViewMode::Faces { 100 } else { 70 };
+        let base_width = if dialog.view_mode == PeopleViewMode::Faces {
+            100
+        } else {
+            70
+        };
         let dialog_width = base_width.min(area.width.saturating_sub(4));
         let dialog_height = 30.min(area.height.saturating_sub(4));
 
@@ -840,8 +865,10 @@ impl App {
         let mouse_y = mouse.row;
 
         // Check if click is within dialog bounds
-        if mouse_x < dialog_x || mouse_x >= dialog_x + dialog_width
-            || mouse_y < dialog_y || mouse_y >= dialog_y + dialog_height
+        if mouse_x < dialog_x
+            || mouse_x >= dialog_x + dialog_width
+            || mouse_y < dialog_y
+            || mouse_y >= dialog_y + dialog_height
         {
             return Ok(());
         }
@@ -928,13 +955,21 @@ impl App {
         } else {
             // Use system default
             #[cfg(target_os = "linux")]
-            { "xdg-open" }
+            {
+                "xdg-open"
+            }
             #[cfg(target_os = "macos")]
-            { "open" }
+            {
+                "open"
+            }
             #[cfg(target_os = "windows")]
-            { "start" }
+            {
+                "start"
+            }
             #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-            { "xdg-open" }
+            {
+                "xdg-open"
+            }
         };
 
         std::process::Command::new(opener)
@@ -967,7 +1002,11 @@ impl App {
             self.load_directory(&parent)?;
             // Select the directory we came from
             if let Some(name) = current_name {
-                if let Some(idx) = self.entries.iter().position(|e| e.path.file_name() == Some(&name)) {
+                if let Some(idx) = self
+                    .entries
+                    .iter()
+                    .position(|e| e.path.file_name() == Some(&name))
+                {
                     self.selected_index = idx;
                     // Adjust scroll to keep selection visible
                     if self.selected_index < self.scroll_offset {
@@ -1000,9 +1039,8 @@ impl App {
 
     fn page_down(&mut self) {
         let page_size = 20;
-        self.selected_index = (self.selected_index + page_size).min(
-            self.entries.len().saturating_sub(1)
-        );
+        self.selected_index =
+            (self.selected_index + page_size).min(self.entries.len().saturating_sub(1));
     }
 
     fn page_up(&mut self) {
@@ -1050,7 +1088,10 @@ impl App {
     }
 
     /// Get full photo metadata from database (cached via ImagePreviewState)
-    pub fn get_photo_metadata(&mut self, path: &std::path::PathBuf) -> Option<crate::db::PhotoMetadata> {
+    pub fn get_photo_metadata(
+        &mut self,
+        path: &std::path::PathBuf,
+    ) -> Option<crate::db::PhotoMetadata> {
         // Check if already cached in the preview state
         if let Some(cached) = self.image_preview.get_cached_metadata(path) {
             return cached.clone();
@@ -1060,7 +1101,8 @@ impl App {
         let metadata = self.db.get_photo_metadata(path).ok().flatten();
 
         // Cache for future lookups
-        self.image_preview.cache_metadata(path.clone(), metadata.clone());
+        self.image_preview
+            .cache_metadata(path.clone(), metadata.clone());
 
         metadata
     }
@@ -1118,7 +1160,8 @@ impl App {
             return Ok(());
         }
 
-        let (_task_id, tx, _cancel_flag) = self.task_manager.register_task(TaskType::FindDuplicates);
+        let (_task_id, tx, _cancel_flag) =
+            self.task_manager.register_task(TaskType::FindDuplicates);
         let db_config = self.config.database.clone();
         let threshold = self.config.scanner.similarity_threshold;
 
@@ -1263,7 +1306,8 @@ impl App {
                         }
                     }
                     if count > 0 {
-                        self.status_message = Some(format!("Auto-marked {} identical duplicates", count));
+                        self.status_message =
+                            Some(format!("Auto-marked {} identical duplicates", count));
                     } else {
                         self.status_message = Some("No identical duplicates to mark".to_string());
                     }
@@ -1323,7 +1367,8 @@ impl App {
                             moved, failed
                         ));
                     } else {
-                        self.status_message = Some(format!("Moved {} files to duplicate trash", moved));
+                        self.status_message =
+                            Some(format!("Moved {} files to duplicate trash", moved));
                     }
 
                     // Auto-empty duplicate trash if configured
@@ -1388,7 +1433,8 @@ impl App {
                             deleted_count, failed_count
                         ));
                     } else {
-                        self.status_message = Some(format!("Permanently deleted {} photos", deleted_count));
+                        self.status_message =
+                            Some(format!("Permanently deleted {} photos", deleted_count));
                     }
 
                     // Remove deleted photos from the in-memory view
@@ -1410,7 +1456,7 @@ impl App {
     }
 
     fn handle_duplicates_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Result<()> {
-        use crossterm::event::{MouseEventKind, MouseButton};
+        use crossterm::event::{MouseButton, MouseEventKind};
 
         let mouse_x = mouse.column;
         let mouse_y = mouse.row;
@@ -1446,7 +1492,8 @@ impl App {
                     // Account for border (1 pixel) and title (1 line)
                     let content_start_y = 2;
                     if mouse_y >= content_start_y {
-                        let clicked_index = (mouse_y - content_start_y) as usize + view.group_scroll;
+                        let clicked_index =
+                            (mouse_y - content_start_y) as usize + view.group_scroll;
                         if clicked_index < view.groups.len() {
                             view.current_group = clicked_index;
                             view.selected_photo = 0;
@@ -1458,7 +1505,8 @@ impl App {
                     let content_start_y = 2;
                     if mouse_y >= content_start_y {
                         if let Some(group) = view.current_group() {
-                            let clicked_index = (mouse_y - content_start_y) as usize + view.photo_scroll;
+                            let clicked_index =
+                                (mouse_y - content_start_y) as usize + view.photo_scroll;
                             if clicked_index < group.photos.len() {
                                 view.selected_photo = clicked_index;
                             }
@@ -1519,7 +1567,9 @@ impl App {
                     view.group_scroll = (view.group_scroll + 3).min(max_scroll);
                     // Keep selection visible
                     if view.current_group >= view.group_scroll + visible_height {
-                        view.current_group = (view.group_scroll + visible_height).saturating_sub(1).min(view.groups.len().saturating_sub(1));
+                        view.current_group = (view.group_scroll + visible_height)
+                            .saturating_sub(1)
+                            .min(view.groups.len().saturating_sub(1));
                         view.selected_photo = 0;
                         view.photo_scroll = 0;
                     }
@@ -1532,7 +1582,9 @@ impl App {
                         view.photo_scroll = (view.photo_scroll + 3).min(max_scroll);
                         // Keep selection visible
                         if view.selected_photo >= view.photo_scroll + visible_height {
-                            view.selected_photo = (view.photo_scroll + visible_height).saturating_sub(1).min(photo_count.saturating_sub(1));
+                            view.selected_photo = (view.photo_scroll + visible_height)
+                                .saturating_sub(1)
+                                .min(photo_count.saturating_sub(1));
                         }
                     }
                 }
@@ -1546,15 +1598,14 @@ impl App {
 
     /// Open a specific path in external viewer
     fn open_external_path(&mut self, path: &PathBuf) -> Result<()> {
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "file".to_string());
 
         #[cfg(target_os = "macos")]
         {
-            std::process::Command::new("open")
-                .arg(path)
-                .spawn()?;
+            std::process::Command::new("open").arg(path).spawn()?;
         }
         #[cfg(target_os = "windows")]
         {
@@ -1564,9 +1615,7 @@ impl App {
         }
         #[cfg(target_os = "linux")]
         {
-            std::process::Command::new("xdg-open")
-                .arg(path)
-                .spawn()?;
+            std::process::Command::new("xdg-open").arg(path).spawn()?;
         }
         self.status_message = Some(format!("Opened: {}", filename));
         Ok(())
@@ -1620,7 +1669,8 @@ impl App {
 
                             if client.supports_embeddings() {
                                 if let Ok(embedding) = client.get_text_embedding(&description) {
-                                    let _ = db.store_embedding(meta.id, &embedding, "text-embedding");
+                                    let _ =
+                                        db.store_embedding(meta.id, &embedding, "text-embedding");
                                 }
                             }
                         } else {
@@ -1628,7 +1678,10 @@ impl App {
                         }
                     }
                     let _ = tx.send(TaskUpdate::Completed {
-                        message: format!("Description saved for {}", path.file_name().unwrap_or_default().to_string_lossy()),
+                        message: format!(
+                            "Description saved for {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ),
                     });
                 }
                 Err(e) => {
@@ -1651,9 +1704,10 @@ impl App {
         // the run instead of being passed through.
         if let Some(prompt) = custom_prompt {
             let folder = self.current_dir.to_string_lossy().into_owned();
-            let conn = self.db.raw_sqlite_conn().ok_or_else(|| {
-                anyhow::anyhow!("v2 batch llm requires SQLite backend")
-            })?;
+            let conn = self
+                .db
+                .raw_sqlite_conn()
+                .ok_or_else(|| anyhow::anyhow!("v2 batch llm requires SQLite backend"))?;
             clepho::db::managed_folders::set_prompt(conn, &folder, &prompt)?;
         }
         self.spawn_ad_hoc_run();
@@ -1887,7 +1941,8 @@ impl App {
         if failed > 0 {
             self.status_message = Some(format!("Moved {} files, {} failed", moved, failed));
         } else {
-            self.status_message = Some(format!("Moved {} files to {}", moved, target_dir.display()));
+            self.status_message =
+                Some(format!("Moved {} files to {}", moved, target_dir.display()));
         }
 
         Ok(())
@@ -2145,10 +2200,10 @@ impl App {
                         Ok(query_embedding) => {
                             match self.db.semantic_search(&query_embedding, 20, 0.3) {
                                 Ok(results) if !results.is_empty() => results,
-                                _ => self.db.semantic_search_by_text(&query, 20)?
+                                _ => self.db.semantic_search_by_text(&query, 20)?,
                             }
                         }
-                        Err(_) => self.db.semantic_search_by_text(&query, 20)?
+                        Err(_) => self.db.semantic_search_by_text(&query, 20)?,
                     }
                 } else {
                     self.db.semantic_search_by_text(&query, 20)?
@@ -2273,7 +2328,9 @@ impl App {
 
         // Get photos without embeddings in current directory
         let current_dir = self.current_dir.to_string_lossy().to_string();
-        let photos = self.db.get_photos_without_embeddings_in_dir(&current_dir, 100)?;
+        let photos = self
+            .db
+            .get_photos_without_embeddings_in_dir(&current_dir, 100)?;
 
         if photos.is_empty() {
             self.status_message = Some("No photos need embedding in this directory".to_string());
@@ -2286,8 +2343,8 @@ impl App {
 
         // Spawn CLIP embedding in background thread
         std::thread::spawn(move || {
-            use crate::tasks::{TaskUpdate, TaskProgress};
             use crate::clip::ClipModel;
+            use crate::tasks::{TaskProgress, TaskUpdate};
             use std::sync::atomic::Ordering;
 
             let db = match crate::db::Database::open(&db_config) {
@@ -2304,7 +2361,7 @@ impl App {
 
             // Initialize CLIP model
             let _ = tx.send(TaskUpdate::Progress(
-                TaskProgress::new(0, total).with_message("Loading CLIP model...")
+                TaskProgress::new(0, total).with_message("Loading CLIP model..."),
             ));
 
             let mut clip = ClipModel::new();
@@ -2329,13 +2386,15 @@ impl App {
                     .unwrap_or_else(|| path.clone());
 
                 let _ = tx.send(TaskUpdate::Progress(
-                    TaskProgress::new(idx + 1, total).with_item(&filename)
+                    TaskProgress::new(idx + 1, total).with_item(&filename),
                 ));
 
                 // Generate embedding
                 match clip.embed_image_file(std::path::Path::new(path)) {
                     Ok(embedding) => {
-                        if let Err(e) = db.store_embedding(*photo_id, &embedding, "clip-vit-base-patch32") {
+                        if let Err(e) =
+                            db.store_embedding(*photo_id, &embedding, "clip-vit-base-patch32")
+                        {
                             tracing::error!(path = %path, error = %e, "Failed to store CLIP embedding");
                         } else {
                             processed += 1;
@@ -2352,7 +2411,10 @@ impl App {
             });
         });
 
-        self.status_message = Some(format!("Generating CLIP embeddings for {} photos...", total));
+        self.status_message = Some(format!(
+            "Generating CLIP embeddings for {} photos...",
+            total
+        ));
         Ok(())
     }
 
@@ -2428,7 +2490,8 @@ impl App {
                             if let Err(e) = self.db.restore_photo(photo_id) {
                                 self.status_message = Some(format!("DB error: {}", e));
                             } else {
-                                self.status_message = Some(format!("Restored to {}", original_path.display()));
+                                self.status_message =
+                                    Some(format!("Restored to {}", original_path.display()));
                                 // Refresh dialog
                                 let trashed = self.db.get_trashed_photos()?;
                                 let total_size = self.db.get_trash_total_size()?;
@@ -2533,7 +2596,12 @@ impl App {
 
         for path in &files_to_trash {
             // Get photo ID if it exists in database
-            let photo_id = self.db.get_photo_metadata(path).ok().flatten().map(|p| p.id);
+            let photo_id = self
+                .db
+                .get_photo_metadata(path)
+                .ok()
+                .flatten()
+                .map(|p| p.id);
 
             match self.trash_manager.move_to_trash(path) {
                 Ok(trash_path) => {
@@ -2638,7 +2706,8 @@ impl App {
 
             // Check if target exists
             if target_path.exists() {
-                self.status_message = Some(format!("File already exists: {}", target_path.display()));
+                self.status_message =
+                    Some(format!("File already exists: {}", target_path.display()));
                 failed += 1;
                 continue;
             }
@@ -2837,10 +2906,14 @@ impl App {
                             // Find existing person or create a new one, then assign the face
                             match self.db.find_or_create_person(&name) {
                                 Ok(person_id) => {
-                                    if let Err(e) = self.db.assign_face_to_person(face_id, person_id) {
-                                        self.status_message = Some(format!("Error assigning face: {}", e));
+                                    if let Err(e) =
+                                        self.db.assign_face_to_person(face_id, person_id)
+                                    {
+                                        self.status_message =
+                                            Some(format!("Error assigning face: {}", e));
                                     } else {
-                                        self.status_message = Some(format!("Assigned to: {}", name));
+                                        self.status_message =
+                                            Some(format!("Assigned to: {}", name));
                                     }
                                 }
                                 Err(e) => {
@@ -2928,7 +3001,9 @@ impl App {
                                 // Try to select the file
                                 if let Some(fname) = photo_path.file_name() {
                                     let fname_str = fname.to_string_lossy().to_string();
-                                    if let Some(idx) = self.entries.iter().position(|e| e.name == fname_str) {
+                                    if let Some(idx) =
+                                        self.entries.iter().position(|e| e.name == fname_str)
+                                    {
                                         self.selected_index = idx;
                                     }
                                 }
@@ -3074,7 +3149,8 @@ impl App {
                 // Create the scheduled task
                 let scheduled_at = dialog.scheduled_at();
                 let target_path = dialog.target_path();
-                let (hours_start, hours_end) = dialog.hours_of_operation()
+                let (hours_start, hours_end) = dialog
+                    .hours_of_operation()
                     .map_or((None, None), |(s, e)| (Some(s), Some(e)));
 
                 match self.db.create_scheduled_task(
@@ -3102,7 +3178,10 @@ impl App {
             }
             KeyCode::Char('n') => {
                 // Run now instead of scheduling
-                self.status_message = Some(format!("Running {} now...", dialog.task_type.display_name()));
+                self.status_message = Some(format!(
+                    "Running {} now...",
+                    dialog.task_type.display_name()
+                ));
 
                 // Start the appropriate task
                 match dialog.task_type {
@@ -3406,7 +3485,8 @@ impl App {
                     }
                 }
                 if rotated > 0 {
-                    self.status_message = Some(format!("Rotated {} image(s) counter-clockwise", rotated));
+                    self.status_message =
+                        Some(format!("Rotated {} image(s) counter-clockwise", rotated));
                     gallery.clear_cache();
                 }
             }
@@ -3442,7 +3522,8 @@ impl App {
                             self.gallery_view = None;
                             self.mode = AppMode::Normal;
                             self.clear_on_next_render = true;
-                            self.status_message = Some("Gallery empty - returning to browser".to_string());
+                            self.status_message =
+                                Some("Gallery empty - returning to browser".to_string());
                         }
                     }
                 }
@@ -3480,7 +3561,8 @@ impl App {
                         let target_path = target_dir.join(filename);
 
                         if target_path.exists() {
-                            self.status_message = Some(format!("File already exists: {}", target_path.display()));
+                            self.status_message =
+                                Some(format!("File already exists: {}", target_path.display()));
                             failed += 1;
                             continue;
                         }
@@ -3501,8 +3583,15 @@ impl App {
                     }
 
                     if moved > 0 {
-                        self.status_message = Some(format!("Moved {} file(s){}", moved,
-                            if failed > 0 { format!(", {} failed", failed) } else { String::new() }));
+                        self.status_message = Some(format!(
+                            "Moved {} file(s){}",
+                            moved,
+                            if failed > 0 {
+                                format!(", {} failed", failed)
+                            } else {
+                                String::new()
+                            }
+                        ));
                         // Resort gallery to include new files
                         gallery.images.sort();
                     }
@@ -3517,11 +3606,8 @@ impl App {
                 let directory = gallery.directory.clone();
 
                 if !images.is_empty() {
-                    let mut slideshow = SlideshowView::new(
-                        directory,
-                        images,
-                        self.config.preview.protocol,
-                    );
+                    let mut slideshow =
+                        SlideshowView::new(directory, images, self.config.preview.protocol);
                     slideshow.current = selected;
                     self.slideshow_view = Some(slideshow);
                     self.mode = AppMode::Slideshow;
@@ -3545,7 +3631,10 @@ impl App {
                     {
                         let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
                     }
-                    self.status_message = Some(format!("Opened: {}", path.file_name().unwrap_or_default().to_string_lossy()));
+                    self.status_message = Some(format!(
+                        "Opened: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    ));
                 }
             }
 
@@ -3810,7 +3899,7 @@ impl App {
         // Persist to config
         self.config.view.show_hidden = self.show_hidden;
         let _ = self.config.save(); // Ignore save errors to not disrupt the UI
-        // Reload directory to apply filter
+                                    // Reload directory to apply filter
         let current_dir = self.current_dir.clone();
         self.load_directory(&current_dir)?;
         Ok(())
@@ -3819,12 +3908,16 @@ impl App {
     /// Toggle between showing only supported image files vs all files
     fn toggle_show_all_files(&mut self) -> Result<()> {
         self.show_all_files = !self.show_all_files;
-        let state = if self.show_all_files { "all files" } else { "images only" };
+        let state = if self.show_all_files {
+            "all files"
+        } else {
+            "images only"
+        };
         self.status_message = Some(format!("Showing: {}", state));
         // Persist to config
         self.config.view.show_all_files = self.show_all_files;
         let _ = self.config.save(); // Ignore save errors to not disrupt the UI
-        // Reload directory to apply filter
+                                    // Reload directory to apply filter
         let current_dir = self.current_dir.clone();
         self.load_directory(&current_dir)?;
         Ok(())
@@ -3836,9 +3929,7 @@ impl App {
             let path = &entry.path;
             #[cfg(target_os = "macos")]
             {
-                std::process::Command::new("open")
-                    .arg(path)
-                    .spawn()?;
+                std::process::Command::new("open").arg(path).spawn()?;
             }
             #[cfg(target_os = "windows")]
             {
@@ -3848,9 +3939,7 @@ impl App {
             }
             #[cfg(target_os = "linux")]
             {
-                std::process::Command::new("xdg-open")
-                    .arg(path)
-                    .spawn()?;
+                std::process::Command::new("xdg-open").arg(path).spawn()?;
             }
             self.status_message = Some(format!("Opened: {}", entry.name));
         }
@@ -3865,9 +3954,8 @@ impl App {
         let library_path = match self.config.library.path.clone() {
             Some(p) => p,
             None => {
-                self.status_message = Some(
-                    "Library path not configured. Set library.path in config.".to_string()
-                );
+                self.status_message =
+                    Some("Library path not configured. Set library.path in config.".to_string());
                 return Ok(());
             }
         };
@@ -3889,11 +3977,8 @@ impl App {
             return Ok(());
         }
 
-        let dialog = CentraliseDialog::new(
-            library_path,
-            self.config.library.operation,
-            source_files,
-        );
+        let dialog =
+            CentraliseDialog::new(library_path, self.config.library.operation, source_files);
         self.centralise_dialog = Some(dialog);
         self.mode = AppMode::Centralising;
         Ok(())
@@ -3901,7 +3986,7 @@ impl App {
 
     /// Handle key events in centralise dialog
     fn handle_centralise_key(&mut self, key: KeyEvent) -> Result<()> {
-        use crate::centralise::{preview_centralise, execute_centralise};
+        use crate::centralise::{execute_centralise, preview_centralise};
 
         let dialog = match self.centralise_dialog.as_mut() {
             Some(d) => d,
@@ -3960,10 +4045,8 @@ impl App {
                                     let success_count = result.succeeded.len();
                                     dialog.result = Some(result);
                                     dialog.mode = CentraliseDialogMode::Results;
-                                    self.status_message = Some(format!(
-                                        "Centralised {} files",
-                                        success_count
-                                    ));
+                                    self.status_message =
+                                        Some(format!("Centralised {} files", success_count));
                                 }
                                 Err(e) => {
                                     dialog.mode = CentraliseDialogMode::Preview;
@@ -4000,7 +4083,9 @@ impl App {
     fn handle_confirm_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
         use crate::ui::confirm_dialog::ConfirmFocus;
 
-        let is_prompt_focused = self.confirm_dialog.as_ref()
+        let is_prompt_focused = self
+            .confirm_dialog
+            .as_ref()
             .map(|d| d.has_prompt_field && d.focus == ConfirmFocus::PromptField)
             .unwrap_or(false);
 
@@ -4027,7 +4112,11 @@ impl App {
                             let dir_str = self.current_dir.to_string_lossy().to_string();
                             let _ = self.db.set_directory_prompt(&dir_str, &dialog.prompt_text);
                         }
-                        let custom_prompt = if dialog.prompt_text.is_empty() { None } else { Some(dialog.prompt_text.clone()) };
+                        let custom_prompt = if dialog.prompt_text.is_empty() {
+                            None
+                        } else {
+                            Some(dialog.prompt_text.clone())
+                        };
                         self.execute_confirmed_action_with_prompt(dialog.action, custom_prompt)?;
                     }
                 }
@@ -4087,7 +4176,11 @@ impl App {
                             let _ = self.db.set_directory_prompt(&dir_str, &dialog.prompt_text);
                         }
                         let custom_prompt = if dialog.has_prompt_field {
-                            if dialog.prompt_text.is_empty() { None } else { Some(dialog.prompt_text.clone()) }
+                            if dialog.prompt_text.is_empty() {
+                                None
+                            } else {
+                                Some(dialog.prompt_text.clone())
+                            }
                         } else {
                             None
                         };
@@ -4107,7 +4200,11 @@ impl App {
     }
 
     /// Execute an action after confirmation (bypasses confirmation check)
-    fn execute_confirmed_action_with_prompt(&mut self, action: Action, custom_prompt: Option<String>) -> Result<()> {
+    fn execute_confirmed_action_with_prompt(
+        &mut self,
+        action: Action,
+        custom_prompt: Option<String>,
+    ) -> Result<()> {
         match action {
             Action::Scan => self.start_scan()?,
             Action::DescribeWithLlm => self.describe_with_llm(custom_prompt)?,
@@ -4124,7 +4221,8 @@ impl App {
     fn show_confirmation(&mut self, action: Action) {
         let initial_prompt = if matches!(action, Action::DescribeWithLlm | Action::BatchLlm) {
             let dir_str = self.current_dir.to_string_lossy().to_string();
-            self.db.get_directory_prompt(&dir_str)
+            self.db
+                .get_directory_prompt(&dir_str)
                 .ok()
                 .flatten()
                 .or_else(|| self.config.llm.custom_prompt.clone())
@@ -4138,7 +4236,9 @@ impl App {
     // --- Settings dialog methods ---
 
     fn open_settings_dialog(&mut self) {
-        self.settings_dialog = Some(crate::ui::settings_dialog::SettingsDialog::new(&self.config));
+        self.settings_dialog = Some(crate::ui::settings_dialog::SettingsDialog::new(
+            &self.config,
+        ));
         self.mode = AppMode::Settings;
     }
 
@@ -4226,7 +4326,9 @@ impl App {
                         self.config = new_config;
                         self.llm_client = LlmClient::from_config(&self.config.llm);
                         // Recreate settings dialog with fresh config
-                        self.settings_dialog = Some(crate::ui::settings_dialog::SettingsDialog::new(&self.config));
+                        self.settings_dialog = Some(
+                            crate::ui::settings_dialog::SettingsDialog::new(&self.config),
+                        );
                         self.status_message = Some("Config reloaded from file".to_string());
                     }
                     Err(e) => {
@@ -4252,9 +4354,9 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
         let folders = clepho::db::managed_folders::list(conn)?;
         let failures = clepho::db::pipeline_events::unresolved_groups(conn)?;
-        self.pipeline_status_screen = Some(
-            crate::ui::pipeline_status::PipelineStatusScreen::new(folders, failures),
-        );
+        self.pipeline_status_screen = Some(crate::ui::pipeline_status::PipelineStatusScreen::new(
+            folders, failures,
+        ));
         self.mode = AppMode::PipelineStatus;
         Ok(())
     }
@@ -4319,10 +4421,7 @@ impl App {
                     };
                     if !err_col.is_empty() {
                         conn.execute(
-                            &format!(
-                                "UPDATE photos SET {0}=NULL WHERE {0} IS NOT NULL",
-                                err_col
-                            ),
+                            &format!("UPDATE photos SET {0}=NULL WHERE {0} IS NOT NULL", err_col),
                             [],
                         )?;
                     }
@@ -4355,9 +4454,9 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
         let folders = clepho::db::managed_folders::list(conn)?;
         let failures = clepho::db::pipeline_events::unresolved_groups(conn)?;
-        self.pipeline_status_screen = Some(
-            crate::ui::pipeline_status::PipelineStatusScreen::new(folders, failures),
-        );
+        self.pipeline_status_screen = Some(crate::ui::pipeline_status::PipelineStatusScreen::new(
+            folders, failures,
+        ));
         Ok(())
     }
 
@@ -4381,9 +4480,13 @@ impl App {
                     return;
                 }
             };
-            if let Err(e) =
-                run_ad_hoc_pass(&conn, &folder, &llm_config, &pipeline_config, &logging_config)
-            {
+            if let Err(e) = run_ad_hoc_pass(
+                &conn,
+                &folder,
+                &llm_config,
+                &pipeline_config,
+                &logging_config,
+            ) {
                 tracing::error!("ad-hoc run on {}: {:#}", folder.display(), e);
             }
         });
@@ -4421,9 +4524,10 @@ impl App {
             ReprocessOutcome::Confirm(stages) => {
                 let folder = self.current_dir.to_string_lossy().into_owned();
                 {
-                    let conn = self.db.raw_sqlite_conn().ok_or_else(|| {
-                        anyhow::anyhow!("v2 reprocess requires SQLite backend")
-                    })?;
+                    let conn = self
+                        .db
+                        .raw_sqlite_conn()
+                        .ok_or_else(|| anyhow::anyhow!("v2 reprocess requires SQLite backend"))?;
                     clepho::pipeline::reprocess::apply_reset(conn, &folder, &stages)?;
                 }
                 self.reprocess_dialog = None;
@@ -4471,8 +4575,8 @@ fn run_ad_hoc_pass(
     use clepho::pipeline::log::JsonlAppender;
     use clepho::pipeline::scheduler::Scheduler;
     use clepho::pipeline::stages::{
-        exif::ExifStage, index::IndexStage, llm::LlmStage, scan::ScanStage,
-        thumb::ThumbStage, Stage,
+        exif::ExifStage, index::IndexStage, llm::LlmStage, scan::ScanStage, thumb::ThumbStage,
+        Stage,
     };
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -4502,7 +4606,10 @@ fn run_ad_hoc_pass(
     let stages: Vec<Arc<dyn Stage>> = vec![
         scan.clone(),
         Arc::new(ExifStage),
-        Arc::new(ThumbStage::new(thumb_dir, pipeline_config.thumbnail_max_edge)),
+        Arc::new(ThumbStage::new(
+            thumb_dir,
+            pipeline_config.thumbnail_max_edge,
+        )),
         Arc::new(LlmStage {
             client: Arc::new(LlmClientAdapter(llm_client)),
             global_prompt_override: None,

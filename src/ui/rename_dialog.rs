@@ -172,7 +172,10 @@ impl RenameDialog {
         for (i, name) in new_names.iter().enumerate() {
             for (j, other) in new_names.iter().enumerate() {
                 if i != j && name == other {
-                    self.error = Some(format!("Conflict: multiple files would have name '{}'", name));
+                    self.error = Some(format!(
+                        "Conflict: multiple files would have name '{}'",
+                        name
+                    ));
                     return;
                 }
             }
@@ -187,7 +190,9 @@ impl RenameDialog {
                         if new_path.exists() {
                             // Check if it's one of the files we're renaming
                             let is_being_renamed = self.preview.iter().any(|(old, _)| {
-                                file_path.file_name().map(|n| n.to_string_lossy().to_string())
+                                file_path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
                                     == Some(old.clone())
                             });
                             if !is_being_renamed {
@@ -251,12 +256,12 @@ pub fn render(frame: &mut Frame, dialog: &RenameDialog, area: Rect) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Length(3),  // Pattern input
-            Constraint::Length(3),  // Variables help
-            Constraint::Min(10),    // Preview
-            Constraint::Length(2),  // Error/status
-            Constraint::Length(2),  // Footer
+            Constraint::Length(3), // Header
+            Constraint::Length(3), // Pattern input
+            Constraint::Length(3), // Variables help
+            Constraint::Min(10),   // Preview
+            Constraint::Length(2), // Error/status
+            Constraint::Length(2), // Footer
         ])
         .split(dialog_area);
 
@@ -278,7 +283,12 @@ pub fn render(frame: &mut Frame, dialog: &RenameDialog, area: Rect) {
     let pattern_after = &dialog.pattern[dialog.cursor..];
     let input = Paragraph::new(Line::from(vec![
         Span::raw(&pattern_display[..pattern_display.len() - 1]),
-        Span::styled("|", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "|",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(pattern_after),
     ]))
     .block(
@@ -290,11 +300,9 @@ pub fn render(frame: &mut Frame, dialog: &RenameDialog, area: Rect) {
     frame.render_widget(input, chunks[1]);
 
     // Variables help
-    let help = Paragraph::new(
-        "Variables: {name} {ext} {date} {time} {counter} {c}",
-    )
-    .style(Style::default().fg(Color::DarkGray))
-    .wrap(Wrap { trim: true });
+    let help = Paragraph::new("Variables: {name} {ext} {date} {time} {counter} {c}")
+        .style(Style::default().fg(Color::DarkGray))
+        .wrap(Wrap { trim: true });
     frame.render_widget(help, chunks[2]);
 
     // Preview list

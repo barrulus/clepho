@@ -105,7 +105,8 @@ impl EditDescriptionDialog {
     }
 
     pub fn is_modified(&self) -> bool {
-        self.original.as_deref() != Some(&self.text) && !(self.original.is_none() && self.text.is_empty())
+        self.original.as_deref() != Some(&self.text)
+            && !(self.original.is_none() && self.text.is_empty())
     }
 
     pub fn get_text(&self) -> &str {
@@ -128,9 +129,9 @@ pub fn render(frame: &mut Frame, dialog: &EditDescriptionDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Filename
-            Constraint::Min(8),     // Text area
-            Constraint::Length(4),  // Help
+            Constraint::Length(3), // Filename
+            Constraint::Min(8),    // Text area
+            Constraint::Length(4), // Help
         ])
         .margin(1)
         .split(dialog_area);
@@ -143,10 +144,16 @@ pub fn render(frame: &mut Frame, dialog: &EditDescriptionDialog, area: Rect) {
     frame.render_widget(block, dialog_area);
 
     // Filename
-    let filename = dialog.photo_path.file_name()
+    let filename = dialog
+        .photo_path
+        .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Unknown".to_string());
-    let modified_marker = if dialog.is_modified() { " [modified]" } else { "" };
+    let modified_marker = if dialog.is_modified() {
+        " [modified]"
+    } else {
+        ""
+    };
     let filename_widget = Paragraph::new(format!("{}{}", filename, modified_marker))
         .style(Style::default().fg(Color::Yellow))
         .block(Block::default().borders(Borders::BOTTOM));
@@ -157,12 +164,7 @@ pub fn render(frame: &mut Frame, dialog: &EditDescriptionDialog, area: Rect) {
         let (before, after) = dialog.text.split_at(dialog.cursor);
         let cursor_char = after.chars().next().unwrap_or(' ');
         let rest = &after[cursor_char.len_utf8()..];
-        format!(
-            "{}{}{}",
-            before,
-            cursor_char,
-            rest
-        )
+        format!("{}{}{}", before, cursor_char, rest)
     } else {
         format!("{}_", dialog.text)
     };

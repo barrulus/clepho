@@ -306,9 +306,9 @@ pub fn render(frame: &mut Frame, dialog: &SettingsDialog, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Tabs
-            Constraint::Min(15),    // Content
-            Constraint::Length(4),  // Help
+            Constraint::Length(3), // Tabs
+            Constraint::Min(15),   // Content
+            Constraint::Length(4), // Help
         ])
         .margin(1)
         .split(dialog_area);
@@ -345,7 +345,9 @@ fn render_tabs(frame: &mut Frame, dialog: &SettingsDialog, area: Rect) {
         .enumerate()
         .flat_map(|(i, (name, section))| {
             let style = if *section == dialog.section {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -436,7 +438,10 @@ fn render_prompts(frame: &mut Frame, dialog: &SettingsDialog, area: Rect) {
     let custom_text = if dialog.editing == EditingField::CustomPrompt {
         format_edit_text(&dialog.edit_buffer, dialog.cursor)
     } else {
-        dialog.custom_prompt.clone().unwrap_or_else(|| "(not set)".to_string())
+        dialog
+            .custom_prompt
+            .clone()
+            .unwrap_or_else(|| "(not set)".to_string())
     };
     let custom_widget = Paragraph::new(custom_text)
         .wrap(Wrap { trim: false })
@@ -444,7 +449,11 @@ fn render_prompts(frame: &mut Frame, dialog: &SettingsDialog, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(custom_style)
-                .title(if dialog.selected == 0 { " > Custom Prompt " } else { " Custom Prompt " }),
+                .title(if dialog.selected == 0 {
+                    " > Custom Prompt "
+                } else {
+                    " Custom Prompt "
+                }),
         );
     frame.render_widget(custom_widget, chunks[0]);
 
@@ -457,16 +466,21 @@ fn render_prompts(frame: &mut Frame, dialog: &SettingsDialog, area: Rect) {
     let base_text = if dialog.editing == EditingField::BasePrompt {
         format_edit_text(&dialog.edit_buffer, dialog.cursor)
     } else {
-        dialog.base_prompt.clone().unwrap_or_else(|| "(using default)".to_string())
+        dialog
+            .base_prompt
+            .clone()
+            .unwrap_or_else(|| "(using default)".to_string())
     };
-    let base_widget = Paragraph::new(base_text)
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(base_style)
-                .title(if dialog.selected == 1 { " > Base Prompt Override " } else { " Base Prompt Override " }),
-        );
+    let base_widget = Paragraph::new(base_text).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(base_style)
+            .title(if dialog.selected == 1 {
+                " > Base Prompt Override "
+            } else {
+                " Base Prompt Override "
+            }),
+    );
     frame.render_widget(base_widget, chunks[1]);
 }
 
@@ -499,7 +513,9 @@ fn format_setting_item(
 ) -> Line<'static> {
     let marker = if selected { "> " } else { "  " };
     let label_style = if selected {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };

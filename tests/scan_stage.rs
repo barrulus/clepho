@@ -1,14 +1,11 @@
 use clepho::db::{apply_v2_schema, SystemClock};
-use clepho::pipeline::stages::{
-    mark_done, scan::ScanStage, Stage, StageId, StageOutcome,
-};
+use clepho::pipeline::stages::{mark_done, scan::ScanStage, Stage, StageId, StageOutcome};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
 fn write_jpeg(path: &std::path::Path) {
     use image::{ImageBuffer, Rgb};
-    let img: ImageBuffer<Rgb<u8>, _> =
-        ImageBuffer::from_fn(8, 8, |_, _| Rgb([255u8, 0, 0]));
+    let img: ImageBuffer<Rgb<u8>, _> = ImageBuffer::from_fn(8, 8, |_, _| Rgb([255u8, 0, 0]));
     img.save_with_format(path, image::ImageFormat::Jpeg)
         .unwrap();
 }

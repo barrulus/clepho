@@ -146,10 +146,18 @@ impl ScheduleDialog {
                 self.use_hours = !self.use_hours;
             }
             ScheduleField::HoursStart => {
-                self.hours_start = if self.hours_start == 0 { 23 } else { self.hours_start - 1 };
+                self.hours_start = if self.hours_start == 0 {
+                    23
+                } else {
+                    self.hours_start - 1
+                };
             }
             ScheduleField::HoursEnd => {
-                self.hours_end = if self.hours_end == 0 { 23 } else { self.hours_end - 1 };
+                self.hours_end = if self.hours_end == 0 {
+                    23
+                } else {
+                    self.hours_end - 1
+                };
             }
         }
     }
@@ -207,27 +215,37 @@ pub fn render(frame: &mut Frame, dialog: &ScheduleDialog, area: Rect) {
         format!("{} files", dialog.files.len())
     };
 
-    let header = Paragraph::new(format!(" Schedule {} for: {}", dialog.task_type.display_name(), file_count))
-        .style(Style::default().fg(Color::Yellow))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow))
-                .title(" Schedule Task "),
-        );
+    let header = Paragraph::new(format!(
+        " Schedule {} for: {}",
+        dialog.task_type.display_name(),
+        file_count
+    ))
+    .style(Style::default().fg(Color::Yellow))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" Schedule Task "),
+    );
     frame.render_widget(header, chunks[0]);
 
     // Content - field list
     let field_style = |f: ScheduleField| {
         if dialog.field == f {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         }
     };
 
     let marker = |f: ScheduleField| {
-        if dialog.field == f { ">" } else { " " }
+        if dialog.field == f {
+            ">"
+        } else {
+            " "
+        }
     };
 
     let mut items = vec![
@@ -235,25 +253,26 @@ pub fn render(frame: &mut Frame, dialog: &ScheduleDialog, area: Rect) {
             "{} Task Type: {}",
             marker(ScheduleField::TaskType),
             dialog.task_type.display_name()
-        )).style(field_style(ScheduleField::TaskType)),
-
+        ))
+        .style(field_style(ScheduleField::TaskType)),
         ListItem::new(format!(
             "{} Date: {}",
             marker(ScheduleField::Date),
             dialog.date.format("%Y-%m-%d")
-        )).style(field_style(ScheduleField::Date)),
-
+        ))
+        .style(field_style(ScheduleField::Date)),
         ListItem::new(format!(
             "{} Time: {:02}:00",
             marker(ScheduleField::Hour),
             dialog.hour
-        )).style(field_style(ScheduleField::Hour)),
-
+        ))
+        .style(field_style(ScheduleField::Hour)),
         ListItem::new(format!(
             "{} Hours of Operation: {}",
             marker(ScheduleField::HoursToggle),
             if dialog.use_hours { "Yes" } else { "No" }
-        )).style(field_style(ScheduleField::HoursToggle)),
+        ))
+        .style(field_style(ScheduleField::HoursToggle)),
     ];
 
     if dialog.use_hours {
@@ -262,22 +281,20 @@ pub fn render(frame: &mut Frame, dialog: &ScheduleDialog, area: Rect) {
                 "{}   Start Hour: {:02}:00",
                 marker(ScheduleField::HoursStart),
                 dialog.hours_start
-            )).style(field_style(ScheduleField::HoursStart))
+            ))
+            .style(field_style(ScheduleField::HoursStart)),
         );
         items.push(
             ListItem::new(format!(
                 "{}   End Hour: {:02}:00",
                 marker(ScheduleField::HoursEnd),
                 dialog.hours_end
-            )).style(field_style(ScheduleField::HoursEnd))
+            ))
+            .style(field_style(ScheduleField::HoursEnd)),
         );
     }
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Settings "),
-    );
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" Settings "));
 
     let mut state = ListState::default();
     frame.render_stateful_widget(list, chunks[1], &mut state);

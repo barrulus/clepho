@@ -97,11 +97,7 @@ impl PipelineStatusScreen {
             "scan: idle  exif: idle  thumb: idle  llm: idle  faces: idle  index: idle\n\
              (live activity pending daemon driver)",
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Workers "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(" Workers "))
         .wrap(Wrap { trim: true });
         f.render_widget(workers, chunks[1]);
 
@@ -264,7 +260,10 @@ mod tests {
     #[test]
     fn esc_closes() {
         let mut s = fixture();
-        assert!(matches!(s.handle_key(key(KeyCode::Esc)), ScreenAction::Close));
+        assert!(matches!(
+            s.handle_key(key(KeyCode::Esc)),
+            ScreenAction::Close
+        ));
     }
 
     #[test]
