@@ -88,18 +88,30 @@ impl Scheduler {
                         error_class,
                         message,
                     }) => {
-                        self.record_failure(
+                        let tripped = self.record_failure(
                             conn, stage.id(), &photo, folder, &error_class, &message, elapsed,
                         )?;
                         report.failed += 1;
-                        break;
+                        if tripped {
+                            break;
+                        }
                     }
                     Err(e) => {
                         let cls = "unhandled".to_string();
                         let msg = format!("{:#}", e);
-                        self.record_failure(conn, stage.id(), &photo, folder, &cls, &msg, elapsed)?;
+                        let tripped = self.record_failure(
+                            conn,
+                            stage.id(),
+                            &photo,
+                            folder,
+                            &cls,
+                            &msg,
+                            elapsed,
+                        )?;
                         report.failed += 1;
-                        break;
+                        if tripped {
+                            break;
+                        }
                     }
                 }
             }
@@ -107,6 +119,10 @@ impl Scheduler {
         Ok(report)
     }
 
+    /// Record one stage failure: writes photos.<stage>_error, appends a
+    /// pipeline_events row, emits a JSONL log entry, and bumps the breaker.
+    /// Returns true iff this failure caused the breaker to trip *now* (so the
+    /// caller can stop hammering the stage on this pass).
     fn record_failure(
         &self,
         conn: &Connection,
@@ -116,7 +132,7 @@ impl Scheduler {
         error_class: &str,
         message: &str,
         elapsed_ms: u64,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         mark_error(conn, stage_id, photo.id, message)?;
         ev_append(
             conn,
@@ -144,7 +160,8 @@ impl Scheduler {
             context: None,
             duration_ms: Some(elapsed_ms),
         });
-        if self.breaker.record_failure(stage_id, error_class) {
+        let tripped = self.breaker.record_failure(stage_id, error_class);
+        if tripped {
             ev_append(
                 conn,
                 &PipelineEvent {
@@ -162,7 +179,7 @@ impl Scheduler {
                 &*self.clock,
             )?;
         }
-        Ok(())
+        Ok(tripped)
     }
 
     fn workers_for(&self, stage: StageId) -> u32 {
