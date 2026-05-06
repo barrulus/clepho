@@ -5014,6 +5014,289 @@ git commit -m "Lock LLM response parser behaviour with fixture tests"
 
 ---
 
+### Task 28b: Complete the daemon driver (deferred from Task 21)
+
+Task 21 shipped the `FolderWatcher` module but explicitly deferred replacing the daemon's main loop because three integration prerequisites were missing. After Tasks 22–28, all the pieces — stages, scheduler, log appender, watcher, fixtures, parser tests — exist. This task wires them together and retires the v1 batch-processing path.
+
+By the time this task runs, every stage and every supporting module already has its own tests. This task adds **one** end-to-end integration test against a real SQLite file plus a synthetic photo tree; the rest of the work is plumbing.
+
+**Files:**
+- Modify: `src/llm/client.rs` (add per-call-prompt method)
+- Modify: `src/db/sqlite.rs` (expose raw connection accessor — SQLite backend only)
+- Modify: `src/db/mod.rs` (forward the accessor through `Database`)
+- Modify: `src/db/sqlite.rs` (make `initialize()` skip v1 SCHEMA when v2 detected)
+- Create: `src/pipeline/llm_adapter.rs` (`impl LlmDescribeClient for LlmClient` adapter)
+- Modify: `src/pipeline/mod.rs` (register `pub mod llm_adapter;`)
+- Modify: `src/bin/daemon.rs` (replace `process_pending_tasks` / `run_daemon_loop`)
+- Create: `tests/daemon_e2e.rs`
+
+Spec reference: §4.5, §4.6, §10.1.
+
+#### Prerequisites: three small refactors
+
+- [ ] **Step 1: Per-call prompt on `LlmClient`**
+
+In `src/llm/client.rs`, add:
+
+```rust
+impl LlmClient {
+    /// Like `describe_and_tag_image` but lets the caller override the custom
+    /// prompt for this single call. Cheaper than rebuilding the entire client
+    /// when the prompt changes per folder.
+    pub fn describe_and_tag_image_with_prompt(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<(String, Vec<String>)> {
+        // The provider currently bakes the prompt at construction time. Two
+        // viable shapes:
+        //   (a) Add a per-call prompt parameter to LlmProvider::describe_image
+        //       and thread it through every provider implementation.
+        //   (b) Build a temporary provider with the override and call through
+        //       the same three-tier parsing this method already uses.
+        // (a) is cleaner; pick it if the provider trait is small. Otherwise (b)
+        // is correct but allocates a provider per call.
+        todo!("implement once you've inspected provider.rs")
+    }
+}
+```
+
+The plan does not pre-decide between (a) and (b). The author should pick after re-reading `src/llm/provider.rs` — if the trait has fewer than five methods, (a) is the right call; otherwise (b) is fine since LLM calls dwarf any allocation cost.
+
+- [ ] **Step 2: `Database` exposes a raw SQLite connection**
+
+In `src/db/sqlite.rs`:
+
+```rust
+impl SqliteDb {
+    pub fn raw_conn(&self) -> &rusqlite::Connection {
+        // Existing field name; check the impl. Likely `&self.conn` or
+        // accessing through the connection pool's lock.
+        &self.conn
+    }
+}
+```
+
+In `src/db/mod.rs`, add a method on `Database` that only works for the SQLite backend:
+
+```rust
+impl Database {
+    /// Returns the underlying SQLite connection for callers that need to drive
+    /// the v2 pipeline directly. Returns None when running on Postgres.
+    pub fn raw_sqlite_conn(&self) -> Option<&rusqlite::Connection> {
+        match &self.inner {
+            DatabaseInner::Sqlite(db) => Some(db.raw_conn()),
+            #[cfg(feature = "postgres")]
+            DatabaseInner::Postgres(_) => None,
+        }
+    }
+}
+```
+
+The pipeline is SQLite-only in Plan 1. Postgres support for the v2 schema is a separate (later) project.
+
+- [ ] **Step 3: `Database::initialize()` is a no-op on v2 DBs**
+
+In `src/db/sqlite.rs::SqliteDb::initialize`, check `schema_version` first:
+
+```rust
+pub fn initialize(&self) -> Result<()> {
+    use crate::db::migrate::{detect_schema_state, SchemaState};
+    if matches!(detect_schema_state(self.raw_conn())?, SchemaState::Current | SchemaState::Newer(_)) {
+        // v2 schema already in place (Task 19's preflight applied it).
+        return Ok(());
+    }
+    // Existing v1 SCHEMA / MIGRATIONS path stays here for backward compat
+    // until Task 29 removes it.
+    /* existing body */
+}
+```
+
+This means: when the daemon's preflight (Task 19) applies v2, the subsequent `db.initialize()` is a no-op. When run against a v1 DB without `--reset-db`, the preflight already exited with code 2 — so this branch is unreachable. The fallback continues to handle pure-v1 operation for the TUI on legacy DBs.
+
+#### The real work
+
+- [ ] **Step 4: `LlmClient` adapter for `LlmDescribeClient`**
+
+Create `src/pipeline/llm_adapter.rs`:
+
+```rust
+//! Bridges the existing crate::llm::LlmClient to the narrower
+//! LlmDescribeClient trait the LlmStage uses.
+
+use crate::llm::client::LlmClient;
+use crate::pipeline::stages::llm::LlmDescribeClient;
+use anyhow::Result;
+use std::path::Path;
+
+pub struct LlmClientAdapter(pub LlmClient);
+
+impl LlmDescribeClient for LlmClientAdapter {
+    fn describe_and_tag_image(
+        &self,
+        image_path: &Path,
+        custom_prompt: Option<&str>,
+    ) -> Result<(String, Vec<String>)> {
+        self.0.describe_and_tag_image_with_prompt(image_path, custom_prompt)
+    }
+
+    fn text_embedding(&self, text: &str) -> Result<Option<Vec<f32>>> {
+        if !self.0.supports_embeddings() {
+            return Ok(None);
+        }
+        self.0.get_text_embedding(text).map(Some)
+    }
+
+    fn embedding_model_name(&self) -> &'static str {
+        // The existing LlmClient doesn't expose this string; if you can't
+        // reach it cheaply, return "" — pipeline_events captures the model in
+        // the embeddings.model column from this getter, so a missing label
+        // is recoverable but logged.
+        ""
+    }
+}
+```
+
+In `src/pipeline/mod.rs`:
+
+```rust
+pub mod llm_adapter;
+```
+
+- [ ] **Step 5: Replace the daemon's main loop**
+
+Rewrite `src/bin/daemon.rs::run_daemon_loop` and `process_pending_tasks` to be scheduler-driven. The shape from Task 21's sketch (lines 3909–3988 of this plan) is the spec; the only changes from that sketch are:
+
+- Use `db.raw_sqlite_conn().expect("v2 daemon requires SQLite")` instead of a parallel rusqlite open.
+- Wrap the `LlmClient` in `LlmClientAdapter` before passing to `LlmStage`.
+- Drop the v1 `process_pending_tasks` body — it becomes `unreachable!()` once Task 29 deletes the `scheduled_tasks` shape, but for this task just stop calling it.
+
+Keep the existing CLI flag handling (`--once`, `--interval`, `--config`, `--reset-db`) unchanged.
+
+- [ ] **Step 6: Wire `T` and the new TUI screen**
+
+Now that the daemon owns the `CircuitBreaker`, the TUI's `PipelineStatusScreen::ScreenAction::RetryGroup` finally has somewhere to send the breaker reset. Two options:
+
+- **(a) IPC-free**: TUI has its own `Arc<CircuitBreaker>` (separate from daemon). RetryGroup just clears the affected `<stage>_error` columns and `<stage>_done_at` markers in the DB; the daemon's breaker reset happens organically on the next observed success.
+- **(b) Shared state**: a small `pipeline_status` table the daemon writes its breaker state into, and the TUI's RetryGroup writes a "please reset" intent the daemon polls on next tick.
+
+(a) is simpler and matches the "daemon and TUI talk through the DB" principle from spec §1.1. Pick (a) unless something forces otherwise.
+
+In `src/app.rs`:
+- Replace the `T → AppMode::TaskList` route with `T → AppMode::PipelineStatus`.
+- Construct `PipelineStatusScreen` on entry with the current `managed_folders::list` and `pipeline_events::unresolved_groups`.
+- Handle `ScreenAction::TogglePause`, `RetryGroup`, `ClearGroup`, `Close` by mutating the DB and refreshing the screen state.
+
+#### Verification
+
+- [ ] **Step 7: End-to-end test**
+
+Create `tests/daemon_e2e.rs`. Build a synthetic photo tree, configure the scheduler, hit `Scheduler::run_pass` against the connection, and assert all six stages walk a photo to completion.
+
+```rust
+//! End-to-end: photo tree → scheduler → all stages done.
+//! Uses MockLlmDescribeClient so the test runs offline.
+
+use clepho::db::{apply_v2_schema, SystemClock};
+use clepho::pipeline::circuit_breaker::CircuitBreaker;
+use clepho::pipeline::log::JsonlAppender;
+use clepho::pipeline::scheduler::Scheduler;
+use clepho::pipeline::stages::{
+    exif::ExifStage, index::IndexStage, llm::{LlmDescribeClient, LlmStage},
+    scan::ScanStage, thumb::ThumbStage, Stage,
+};
+use rusqlite::Connection;
+use std::path::Path;
+use std::sync::Arc;
+
+struct MockLlm;
+impl LlmDescribeClient for MockLlm {
+    fn describe_and_tag_image(
+        &self, _: &Path, _: Option<&str>,
+    ) -> anyhow::Result<(String, Vec<String>)> {
+        Ok(("a sunset".into(), vec!["sunset".into()]))
+    }
+}
+
+#[test]
+fn daemon_pipeline_walks_photo_to_index_done() {
+    let src = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let logs = tempfile::tempdir().unwrap();
+
+    // Write one fake jpeg
+    let img: image::ImageBuffer<image::Rgb<u8>, _> =
+        image::ImageBuffer::from_fn(32, 32, |_, _| image::Rgb([200u8, 100, 50]));
+    let path = src.path().join("a.jpg");
+    img.save(&path).unwrap();
+
+    let conn = Connection::open_in_memory().unwrap();
+    apply_v2_schema(&conn).unwrap();
+
+    let scan = Arc::new(ScanStage::new(
+        vec![src.path().to_path_buf()],
+        vec!["jpg".into()],
+    ));
+    scan.discover(&conn, src.path()).unwrap();
+
+    let stages: Vec<Arc<dyn Stage>> = vec![
+        scan.clone(),
+        Arc::new(ExifStage),
+        Arc::new(ThumbStage::new(cache.path().to_path_buf(), 64)),
+        Arc::new(LlmStage { client: Arc::new(MockLlm), global_prompt_override: None }),
+        Arc::new(IndexStage),
+    ];
+
+    let scheduler = Scheduler {
+        stages,
+        breaker: Arc::new(CircuitBreaker::new(3)),
+        log: Arc::new(JsonlAppender::new(logs.path()).unwrap()),
+        config: clepho::config::PipelineConfig::default(),
+        clock: Arc::new(SystemClock),
+        cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
+    // Run enough passes to walk through every stage. Each pass advances
+    // exactly the stages whose prereqs are met; five stages → at most five
+    // passes from a fresh row.
+    for _ in 0..6 {
+        scheduler.run_pass(&conn, None).unwrap();
+    }
+
+    let (s, e, t, l, i): (Option<String>, Option<String>, Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT scan_done_at, exif_done_at, thumb_done_at, llm_done_at, index_done_at
+             FROM photos WHERE path LIKE '%a.jpg'",
+            [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        ).unwrap();
+    assert!(s.is_some() && e.is_some() && t.is_some() && l.is_some() && i.is_some(),
+        "all stages should be done; got scan={:?} exif={:?} thumb={:?} llm={:?} index={:?}",
+        s, e, t, l, i);
+}
+```
+
+- [ ] **Step 8: Manual daemon smoke**
+
+Run `cargo build --bin clepho-daemon`, then against a temp config + a small photo dir:
+
+```bash
+target/debug/clepho-daemon --config /tmp/clepho-test.toml --once
+```
+
+Confirm the stages all advance (peek at the DB or the JSONL log) and the daemon exits cleanly.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/llm/client.rs src/db/sqlite.rs src/db/mod.rs \
+        src/pipeline/llm_adapter.rs src/pipeline/mod.rs \
+        src/bin/daemon.rs src/app.rs \
+        tests/daemon_e2e.rs
+git commit -m "Complete daemon driver: scheduler-driven loop with watcher"
+```
+
+---
+
 ### Task 29: Cleanup — delete obsolete code
 
 Remove code superseded by Plan 1. Old gallery + tag/edit dialogs stay (Plan 4 retires them); old LLM queue and `directory_prompts` table go now.
