@@ -79,13 +79,16 @@ fn main() -> Result<()> {
     db.initialize()?;
     info!("Database opened at {:?}", config.db_path());
 
-    // Main loop
+    // Main loop — v2 pipeline scheduler.
     if daemon_config.once {
         info!("Running in single-shot mode");
-        process_pending_tasks(&db, &config)?;
+        run_pipeline_pass(&db, &config)?;
     } else {
-        info!("Running in daemon mode, polling every {} seconds", daemon_config.poll_interval);
-        run_daemon_loop(&db, &config, daemon_config.poll_interval)?;
+        info!(
+            "Running in daemon mode, polling every {} seconds",
+            daemon_config.poll_interval
+        );
+        run_pipeline_loop(&db, &config, daemon_config.poll_interval)?;
     }
 
     info!("Clepho daemon stopped");
@@ -272,6 +275,213 @@ fn preflight_schema_check(config: &Config, reset_db: bool) -> Result<()> {
     Ok(())
 }
 
+/// Build the v2 pipeline scheduler from config and an open Database. Returns
+/// the scheduler plus the FolderWatcher (None when no managed folders exist).
+fn build_scheduler(
+    db: &Database,
+    config: &Config,
+) -> Result<(
+    clepho::pipeline::scheduler::Scheduler,
+    Option<clepho::pipeline::watcher::FolderWatcher>,
+    std::sync::Arc<clepho::pipeline::stages::scan::ScanStage>,
+)> {
+    use clepho::db::clock::SystemClock;
+    use clepho::pipeline::circuit_breaker::CircuitBreaker;
+    use clepho::pipeline::llm_adapter::LlmClientAdapter;
+    use clepho::pipeline::log::JsonlAppender;
+    use clepho::pipeline::scheduler::Scheduler;
+    use clepho::pipeline::stages::{
+        exif::ExifStage, index::IndexStage, llm::LlmStage, scan::ScanStage, thumb::ThumbStage,
+        Stage,
+    };
+    use clepho::pipeline::watcher::FolderWatcher;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let conn = db
+        .raw_sqlite_conn()
+        .ok_or_else(|| anyhow::anyhow!("v2 daemon requires SQLite backend"))?;
+
+    // Resolve directories
+    let log_dir = config
+        .logging
+        .log_dir
+        .clone()
+        .unwrap_or_else(JsonlAppender::default_path);
+    let log = Arc::new(JsonlAppender::new(log_dir).context("init JSONL log appender")?);
+    log.rotate(config.logging.retention_days)
+        .context("rotate JSONL logs")?;
+
+    let thumb_dir = config
+        .pipeline
+        .thumbnail_cache_dir
+        .clone()
+        .unwrap_or_else(|| {
+            dirs::cache_dir()
+                .unwrap_or_default()
+                .join("clepho/thumbnails")
+        });
+
+    // Build LLM client + adapter
+    let llm_client = clepho::llm::client::LlmClient::from_config(&config.llm);
+
+    // Stage instances
+    let folders: Vec<std::path::PathBuf> = clepho::db::managed_folders::list(conn)?
+        .into_iter()
+        .map(|m| std::path::PathBuf::from(m.path))
+        .collect();
+    let scan = Arc::new(ScanStage::new(
+        folders.clone(),
+        config.pipeline.allowed_extensions.clone(),
+    ));
+    let exif = Arc::new(ExifStage);
+    let thumb = Arc::new(ThumbStage::new(thumb_dir, config.pipeline.thumbnail_max_edge));
+    let llm = Arc::new(LlmStage {
+        client: Arc::new(LlmClientAdapter(llm_client)),
+        global_prompt_override: None,
+    });
+    let index = Arc::new(IndexStage);
+
+    let stages: Vec<Arc<dyn Stage>> = vec![
+        scan.clone(),
+        exif,
+        thumb,
+        llm,
+        index,
+    ];
+
+    let breaker = Arc::new(CircuitBreaker::new(
+        config.pipeline.circuit_breaker_threshold,
+    ));
+
+    let scheduler = Scheduler {
+        stages,
+        breaker,
+        log,
+        config: config.pipeline.clone(),
+        clock: Arc::new(SystemClock),
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+
+    let active: Vec<std::path::PathBuf> = clepho::db::managed_folders::list(conn)?
+        .into_iter()
+        .filter(|m| !m.paused)
+        .map(|m| std::path::PathBuf::from(m.path))
+        .collect();
+    let watcher = if active.is_empty() {
+        None
+    } else {
+        Some(FolderWatcher::watch(active).context("filesystem watcher")?)
+    };
+
+    Ok((scheduler, watcher, scan))
+}
+
+/// One pipeline pass over every managed folder (or once over no folder at all
+/// if none configured — useful for `--once` against an empty DB).
+fn run_pipeline_pass(db: &Database, config: &Config) -> Result<()> {
+    let conn = db
+        .raw_sqlite_conn()
+        .ok_or_else(|| anyhow::anyhow!("v2 daemon requires SQLite backend"))?;
+    let (scheduler, _watcher, scan) = build_scheduler(db, config)?;
+
+    let folders = clepho::db::managed_folders::list(conn)?;
+    if folders.is_empty() {
+        info!("No managed folders configured; running scheduler against entire DB");
+        scheduler.run_pass(conn, None)?;
+        return Ok(());
+    }
+
+    for f in folders {
+        if f.paused {
+            continue;
+        }
+        let path = std::path::Path::new(&f.path);
+        if let Err(e) = scan.discover(conn, path) {
+            warn!("scan.discover({}) failed: {:#}", f.path, e);
+        }
+        let report = scheduler.run_pass(conn, Some(&f.path))?;
+        info!(
+            "{}: processed={} succeeded={} failed={} skipped_paused={}",
+            f.path, report.processed, report.succeeded, report.failed, report.skipped_paused
+        );
+        clepho::db::managed_folders::set_last_run(
+            conn,
+            &f.path,
+            &chrono::Utc::now().to_rfc3339(),
+        )?;
+    }
+    Ok(())
+}
+
+/// Polling loop: tick every `poll_interval` seconds, draining filesystem
+/// events between ticks so newly-arrived files get picked up immediately.
+fn run_pipeline_loop(db: &Database, config: &Config, poll_interval: u64) -> Result<()> {
+    let conn = db
+        .raw_sqlite_conn()
+        .ok_or_else(|| anyhow::anyhow!("v2 daemon requires SQLite backend"))?;
+    let (scheduler, watcher, scan) = build_scheduler(db, config)?;
+
+    loop {
+        // 1. Drain filesystem events, discover any new files in their parents.
+        if let Some(w) = &watcher {
+            while let Ok(path) = w.events.try_recv() {
+                if path.is_file() {
+                    if let Some(parent) = path.parent() {
+                        let _ = scan.discover(conn, parent);
+                    }
+                }
+            }
+        }
+
+        // 2. Optionally honour configured working hours.
+        if !should_process_now(config) {
+            info!("Outside hours of operation, skipping this cycle");
+            thread::sleep(Duration::from_secs(poll_interval));
+            continue;
+        }
+
+        // 3. One scheduler pass per managed folder.
+        let folders = match clepho::db::managed_folders::list(conn) {
+            Ok(f) => f,
+            Err(e) => {
+                error!("managed_folders::list failed: {:#}", e);
+                Vec::new()
+            }
+        };
+        for f in folders {
+            if f.paused {
+                continue;
+            }
+            let path = std::path::Path::new(&f.path);
+            if let Err(e) = scan.discover(conn, path) {
+                warn!("scan.discover({}) failed: {:#}", f.path, e);
+            }
+            match scheduler.run_pass(conn, Some(&f.path)) {
+                Ok(report) => {
+                    if report.processed > 0 {
+                        info!(
+                            "{}: processed={} succeeded={} failed={}",
+                            f.path, report.processed, report.succeeded, report.failed
+                        );
+                    }
+                }
+                Err(e) => error!("run_pass({}) failed: {:#}", f.path, e),
+            }
+            if let Err(e) = clepho::db::managed_folders::set_last_run(
+                conn,
+                &f.path,
+                &chrono::Utc::now().to_rfc3339(),
+            ) {
+                warn!("set_last_run({}) failed: {:#}", f.path, e);
+            }
+        }
+
+        thread::sleep(Duration::from_secs(poll_interval));
+    }
+}
+
+#[allow(dead_code)] // Replaced by run_pipeline_loop; deleted by Task 29.
 fn run_daemon_loop(
     db: &Database,
     config: &Config,
