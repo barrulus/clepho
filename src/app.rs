@@ -1645,42 +1645,18 @@ impl App {
     }
 
     fn start_batch_llm(&mut self, custom_prompt: Option<String>) -> Result<()> {
-        // Don't start if already processing
-        if self.task_manager.is_running(TaskType::LlmBatch) {
-            self.status_message = Some("Batch LLM already running".to_string());
-            return Ok(());
-        }
-
-        // Get photos without descriptions in current directory
-        let task_rows = self.db.get_photos_without_description_in_dir(&self.current_dir)?;
-        let tasks: Vec<crate::llm::LlmTask> = task_rows.into_iter().map(|(id, path)| {
-            crate::llm::LlmTask { photo_id: id, photo_path: PathBuf::from(path) }
-        }).collect();
-
-        if tasks.is_empty() {
-            self.status_message = Some("No unprocessed photos in this directory".to_string());
-            return Ok(());
-        }
-
-        let total = tasks.len();
-        let concurrency = self.config.llm.batch_concurrency;
-        let (_task_id, tx, cancel_flag) = self.task_manager.register_task(TaskType::LlmBatch);
-        let mut llm_config = self.config.llm.clone();
+        // Replaced the v1 LlmQueue path with a scheduler pass on the current
+        // folder. The LLM stage reads per-folder prompts from folder_prompts
+        // automatically, so a one-shot custom_prompt is persisted there before
+        // the run instead of being passed through.
         if let Some(prompt) = custom_prompt {
-            llm_config.custom_prompt = Some(prompt);
+            let folder = self.current_dir.to_string_lossy().into_owned();
+            let conn = self.db.raw_sqlite_conn().ok_or_else(|| {
+                anyhow::anyhow!("v2 batch llm requires SQLite backend")
+            })?;
+            clepho::db::managed_folders::set_prompt(conn, &folder, &prompt)?;
         }
-        let db_config = self.config.database.clone();
-
-        // Spawn batch processing in background thread
-        std::thread::spawn(move || {
-            let client = LlmClient::from_config(&llm_config);
-            let mut queue = crate::llm::LlmQueue::new(client);
-            queue.add_tasks(tasks);
-            queue.process_all_parallel(&db_config, tx, cancel_flag, concurrency);
-        });
-
-        self.status_message = Some(format!("Processing {} photos ({} workers)...", total, concurrency));
-
+        self.spawn_ad_hoc_run();
         Ok(())
     }
 
