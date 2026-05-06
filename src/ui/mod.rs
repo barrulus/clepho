@@ -199,4 +199,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             settings_dialog::render(frame, dialog, area);
         }
     }
+
+    // Render Pipeline Status screen.
+    if app.mode == AppMode::PipelineStatus {
+        if let Some(ref mut screen) = app.pipeline_status_screen {
+            screen.render(frame, area);
+        }
+    }
+
+    // Render reprocess dialog.
+    if app.mode == AppMode::Reprocessing {
+        if let Some(ref dialog) = app.reprocess_dialog {
+            dialog.render(frame, area);
+        }
+    }
 }

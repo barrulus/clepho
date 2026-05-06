@@ -3,7 +3,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent,
 use ratatui::prelude::*;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -70,6 +70,8 @@ pub enum AppMode {
     Settings,
     #[allow(dead_code)] // wired by daemon precheck + pending TUI integration
     ResetDb,
+    PipelineStatus,
+    Reprocessing,
 }
 
 #[allow(dead_code)]
@@ -141,6 +143,10 @@ pub struct App {
     pub confirm_dialog: Option<ConfirmDialog>,
     // Settings dialog
     pub settings_dialog: Option<crate::ui::settings_dialog::SettingsDialog>,
+    // Pipeline Status screen (Task 22)
+    pub pipeline_status_screen: Option<crate::ui::pipeline_status::PipelineStatusScreen>,
+    // Force-reprocess dialog (Task 23)
+    pub reprocess_dialog: Option<crate::ui::reprocess_dialog::ReprocessDialog>,
     // Action map for configurable keybindings
     pub action_map: HashMap<(KeyCode, KeyModifiers), Action>,
     // View filters
@@ -214,6 +220,8 @@ impl App {
             centralise_dialog: None,
             confirm_dialog: None,
             settings_dialog: None,
+            pipeline_status_screen: None,
+            reprocess_dialog: None,
             action_map,
             show_hidden,
             show_all_files,
@@ -466,6 +474,16 @@ impl App {
             return self.handle_task_list_key(key);
         }
 
+        // Handle Pipeline Status mode (spec §4.7).
+        if self.mode == AppMode::PipelineStatus {
+            return self.handle_pipeline_status_key(key);
+        }
+
+        // Handle Reprocess dialog mode.
+        if self.mode == AppMode::Reprocessing {
+            return self.handle_reprocess_dialog_key(key);
+        }
+
         // Handle TrashViewing mode
         if self.mode == AppMode::TrashViewing {
             return self.handle_trash_dialog_key(key);
@@ -635,6 +653,23 @@ impl App {
             return Ok(());
         }
 
+        // Spec §4.6: R / Shift+R / M for pipeline run / reprocess / manage.
+        // Hardcoded — these are part of the v2 spec, not user-customizable.
+        if key.code == KeyCode::Char('R')
+            && !key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            self.spawn_ad_hoc_run();
+            return Ok(());
+        }
+        if key.code == KeyCode::Char('R') && key.modifiers.contains(KeyModifiers::SHIFT) {
+            self.open_reprocess_dialog()?;
+            return Ok(());
+        }
+        if key.code == KeyCode::Char('M') {
+            self.toggle_managed_folder()?;
+            return Ok(());
+        }
+
         // Look up action from configurable keybindings
         let key_combo = (key.code, key.modifiers);
         if let Some(&action) = self.action_map.get(&key_combo) {
@@ -673,7 +708,7 @@ impl App {
                 self.show_confirmation(action);
             }
             Action::FindDuplicates => self.find_duplicates()?,
-            Action::ViewTasks => self.mode = AppMode::TaskList,
+            Action::ViewTasks => self.open_pipeline_status()?,
             Action::ViewTrash => self.open_trash_dialog()?,
             Action::MoveFiles => self.open_move_dialog()?,
             Action::RenameFiles => self.open_rename_dialog()?,
@@ -4228,6 +4263,291 @@ impl App {
 
         Ok(())
     }
+
+    // ========================================================================
+    // Task 28b Step 6: Pipeline Status / Reprocess / R / M wiring (spec §4.6, §4.7)
+    // ========================================================================
+
+    /// `T` opens the new Pipeline Status screen (replacing the v1 task list).
+    fn open_pipeline_status(&mut self) -> Result<()> {
+        let conn = self
+            .db
+            .raw_sqlite_conn()
+            .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
+        let folders = clepho::db::managed_folders::list(conn)?;
+        let failures = clepho::db::pipeline_events::unresolved_groups(conn)?;
+        self.pipeline_status_screen = Some(
+            crate::ui::pipeline_status::PipelineStatusScreen::new(folders, failures),
+        );
+        self.mode = AppMode::PipelineStatus;
+        Ok(())
+    }
+
+    fn handle_pipeline_status_key(&mut self, key: KeyEvent) -> Result<()> {
+        let action = match self.pipeline_status_screen.as_mut() {
+            Some(s) => s.handle_key(key),
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+
+        use crate::ui::pipeline_status::ScreenAction;
+        match action {
+            ScreenAction::None => {}
+            ScreenAction::Close => {
+                self.pipeline_status_screen = None;
+                self.mode = AppMode::Normal;
+            }
+            ScreenAction::TogglePause(path) => {
+                let conn = self
+                    .db
+                    .raw_sqlite_conn()
+                    .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
+                let now_paused = clepho::db::managed_folders::list(conn)?
+                    .into_iter()
+                    .find(|m| m.path == path)
+                    .map(|m| m.paused)
+                    .unwrap_or(false);
+                clepho::db::managed_folders::set_paused(conn, &path, !now_paused)?;
+                self.refresh_pipeline_status()?;
+                self.status_message = Some(format!(
+                    "Folder {}: {}",
+                    path,
+                    if now_paused { "resumed" } else { "paused" }
+                ));
+            }
+            ScreenAction::RetryGroup { stage, error_class } => {
+                let conn = self
+                    .db
+                    .raw_sqlite_conn()
+                    .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
+                // Clear the matching pipeline_events rows and the matching
+                // <stage>_error column on the photos referenced. The daemon's
+                // breaker resets organically when the stage next sees a success.
+                let n = clepho::db::pipeline_events::resolve_group(
+                    conn,
+                    stage.as_deref(),
+                    error_class.as_deref(),
+                    &clepho::db::SystemClock,
+                )?;
+                if let Some(stage_name) = stage.as_deref() {
+                    let err_col = match stage_name {
+                        "scan" => "scan_error",
+                        "exif" => "exif_error",
+                        "thumb" => "thumb_error",
+                        "llm" => "llm_error",
+                        "faces" => "faces_error",
+                        "index" => "index_error",
+                        _ => "",
+                    };
+                    if !err_col.is_empty() {
+                        conn.execute(
+                            &format!(
+                                "UPDATE photos SET {0}=NULL WHERE {0} IS NOT NULL",
+                                err_col
+                            ),
+                            [],
+                        )?;
+                    }
+                }
+                self.refresh_pipeline_status()?;
+                self.status_message = Some(format!("Retried {} events", n));
+            }
+            ScreenAction::ClearGroup { stage, error_class } => {
+                let conn = self
+                    .db
+                    .raw_sqlite_conn()
+                    .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
+                let n = clepho::db::pipeline_events::resolve_group(
+                    conn,
+                    stage.as_deref(),
+                    error_class.as_deref(),
+                    &clepho::db::SystemClock,
+                )?;
+                self.refresh_pipeline_status()?;
+                self.status_message = Some(format!("Cleared {} events", n));
+            }
+        }
+        Ok(())
+    }
+
+    fn refresh_pipeline_status(&mut self) -> Result<()> {
+        let conn = self
+            .db
+            .raw_sqlite_conn()
+            .ok_or_else(|| anyhow::anyhow!("v2 pipeline status requires SQLite backend"))?;
+        let folders = clepho::db::managed_folders::list(conn)?;
+        let failures = clepho::db::pipeline_events::unresolved_groups(conn)?;
+        self.pipeline_status_screen = Some(
+            crate::ui::pipeline_status::PipelineStatusScreen::new(folders, failures),
+        );
+        Ok(())
+    }
+
+    /// `R` — kick off a single scheduler pass on the current folder in the
+    /// background. Plan 1 keeps it simple: opens a parallel rusqlite::Connection
+    /// in a worker thread, runs scan.discover + run_pass for the folder, exits.
+    /// Status surfaces on the next refresh of the Pipeline Status screen.
+    fn spawn_ad_hoc_run(&mut self) {
+        let folder = self.current_dir.clone();
+        let display = folder.display().to_string();
+        let sqlite_path = self.config.database.sqlite_path.clone();
+        let llm_config = self.config.llm.clone();
+        let pipeline_config = self.config.pipeline.clone();
+        let logging_config = self.config.logging.clone();
+
+        std::thread::spawn(move || {
+            let conn = match rusqlite::Connection::open(&sqlite_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("ad-hoc run: open db: {:#}", e);
+                    return;
+                }
+            };
+            if let Err(e) =
+                run_ad_hoc_pass(&conn, &folder, &llm_config, &pipeline_config, &logging_config)
+            {
+                tracing::error!("ad-hoc run on {}: {:#}", folder.display(), e);
+            }
+        });
+
+        self.status_message = Some(format!("Running pipeline on {}", display));
+    }
+
+    fn open_reprocess_dialog(&mut self) -> Result<()> {
+        let conn = self
+            .db
+            .raw_sqlite_conn()
+            .ok_or_else(|| anyhow::anyhow!("v2 reprocess requires SQLite backend"))?;
+        let folder = self.current_dir.to_string_lossy().into_owned();
+        let dialog = crate::ui::reprocess_dialog::ReprocessDialog::new(conn, folder)?;
+        self.reprocess_dialog = Some(dialog);
+        self.mode = AppMode::Reprocessing;
+        Ok(())
+    }
+
+    fn handle_reprocess_dialog_key(&mut self, key: KeyEvent) -> Result<()> {
+        use crate::ui::reprocess_dialog::ReprocessOutcome;
+        let outcome = match self.reprocess_dialog.as_mut() {
+            Some(d) => d.handle_key(key),
+            None => {
+                self.mode = AppMode::Normal;
+                return Ok(());
+            }
+        };
+        match outcome {
+            ReprocessOutcome::Pending => {}
+            ReprocessOutcome::Cancel => {
+                self.reprocess_dialog = None;
+                self.mode = AppMode::Normal;
+            }
+            ReprocessOutcome::Confirm(stages) => {
+                let folder = self.current_dir.to_string_lossy().into_owned();
+                {
+                    let conn = self.db.raw_sqlite_conn().ok_or_else(|| {
+                        anyhow::anyhow!("v2 reprocess requires SQLite backend")
+                    })?;
+                    clepho::pipeline::reprocess::apply_reset(conn, &folder, &stages)?;
+                }
+                self.reprocess_dialog = None;
+                self.mode = AppMode::Normal;
+                self.spawn_ad_hoc_run();
+                self.status_message = Some(format!(
+                    "Reprocess: cleared {} stages on {}",
+                    stages.len(),
+                    folder
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn toggle_managed_folder(&mut self) -> Result<()> {
+        let conn = self
+            .db
+            .raw_sqlite_conn()
+            .ok_or_else(|| anyhow::anyhow!("v2 managed folders require SQLite backend"))?;
+        let folder = self.current_dir.to_string_lossy().into_owned();
+        if clepho::db::managed_folders::is_managed(conn, &folder)? {
+            clepho::db::managed_folders::remove(conn, &folder)?;
+            self.status_message = Some(format!("Folder unmanaged: {}", folder));
+        } else {
+            clepho::db::managed_folders::add(conn, &folder, None)?;
+            self.status_message = Some(format!("Folder managed: {}", folder));
+        }
+        Ok(())
+    }
+}
+
+/// Build a one-shot scheduler against a parallel rusqlite::Connection and run
+/// one pass on the folder. Used by App::spawn_ad_hoc_run from a worker thread.
+fn run_ad_hoc_pass(
+    conn: &rusqlite::Connection,
+    folder: &Path,
+    llm_config: &crate::config::LlmConfig,
+    pipeline_config: &crate::config::PipelineConfig,
+    logging_config: &crate::config::LoggingConfig,
+) -> Result<()> {
+    use clepho::db::clock::SystemClock;
+    use clepho::pipeline::circuit_breaker::CircuitBreaker;
+    use clepho::pipeline::llm_adapter::LlmClientAdapter;
+    use clepho::pipeline::log::JsonlAppender;
+    use clepho::pipeline::scheduler::Scheduler;
+    use clepho::pipeline::stages::{
+        exif::ExifStage, index::IndexStage, llm::LlmStage, scan::ScanStage,
+        thumb::ThumbStage, Stage,
+    };
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let log_dir = logging_config
+        .log_dir
+        .clone()
+        .unwrap_or_else(JsonlAppender::default_path);
+    let log = Arc::new(JsonlAppender::new(log_dir)?);
+    let thumb_dir = pipeline_config
+        .thumbnail_cache_dir
+        .clone()
+        .unwrap_or_else(|| {
+            dirs::cache_dir()
+                .unwrap_or_default()
+                .join("clepho/thumbnails")
+        });
+
+    let llm_client = clepho::llm::client::LlmClient::from_config(llm_config);
+
+    let scan = Arc::new(ScanStage::new(
+        vec![folder.to_path_buf()],
+        pipeline_config.allowed_extensions.clone(),
+    ));
+    scan.discover(conn, folder)?;
+
+    let stages: Vec<Arc<dyn Stage>> = vec![
+        scan.clone(),
+        Arc::new(ExifStage),
+        Arc::new(ThumbStage::new(thumb_dir, pipeline_config.thumbnail_max_edge)),
+        Arc::new(LlmStage {
+            client: Arc::new(LlmClientAdapter(llm_client)),
+            global_prompt_override: None,
+        }),
+        Arc::new(IndexStage),
+    ];
+
+    let scheduler = Scheduler {
+        stages,
+        breaker: Arc::new(CircuitBreaker::new(
+            pipeline_config.circuit_breaker_threshold,
+        )),
+        log,
+        config: pipeline_config.clone(),
+        clock: Arc::new(SystemClock),
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+
+    let folder_str = folder.to_string_lossy();
+    scheduler.run_pass(conn, Some(&folder_str))?;
+    Ok(())
 }
 
 fn is_image(filename: &str) -> bool {
