@@ -5,6 +5,7 @@ pub mod clock;
 pub mod embeddings;
 pub mod faces;
 pub mod filter_eval;
+pub mod managed_folders;
 pub mod migrate;
 pub mod pipeline_events;
 pub mod provenance;
