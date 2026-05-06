@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "clepho-daemon"
 path = "src/bin/daemon.rs"
 
+[[example]]
+name = "build_photo_fixtures"
+path = "tests/fixtures/photos/build.rs"
+
 [features]
 default = []
 postgres = ["dep:postgres", "dep:r2d2", "dep:r2d2_postgres"]

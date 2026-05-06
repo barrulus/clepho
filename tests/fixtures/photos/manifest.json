@@ -1,0 +1,21 @@
+{
+  "note": "synthesised JPEGs without EXIF. Tests asserting real EXIF presence should stay marked #[ignore] until little_exif (or similar) is wired into this generator.",
+  "photos": [
+    {
+      "file": "rome_2024_06_12.jpg",
+      "has_exif": false
+    },
+    {
+      "file": "florence_2024_06_15.jpg",
+      "has_exif": false
+    },
+    {
+      "file": "no_exif.jpg",
+      "has_exif": false
+    },
+    {
+      "file": "no_gps.jpg",
+      "has_exif": false
+    }
+  ]
+}
