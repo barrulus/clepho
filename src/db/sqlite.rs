@@ -281,7 +281,7 @@ impl SqliteDb {
 
     pub fn set_user_rotation(&self, path: &Path, rotation: i32) -> Result<()> {
         let path_str = path.to_string_lossy();
-        let normalized = ((rotation % 360) + 360) % 360;
+        let normalized = rotation.rem_euclid(360);
         self.conn.execute(
             "UPDATE photos SET user_rotation = ? WHERE path = ?",
             rusqlite::params![normalized, path_str],
@@ -1916,6 +1916,7 @@ impl SqliteDb {
         Ok(count > 0)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_scanned_photo(
         &self,
         path: &str,
@@ -1965,6 +1966,7 @@ impl SqliteDb {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_scanned_photo(
         &self,
         path: &str,

@@ -129,6 +129,7 @@ impl Scheduler {
     /// pipeline_events row, emits a JSONL log entry, and bumps the breaker.
     /// Returns true iff this failure caused the breaker to trip *now* (so the
     /// caller can stop hammering the stage on this pass).
+    #[allow(clippy::too_many_arguments)]
     fn record_failure(
         &self,
         conn: &Connection,

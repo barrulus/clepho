@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub database: DatabaseConfig,
@@ -976,26 +976,6 @@ impl Default for ScannerConfig {
         Self {
             image_extensions: default_image_extensions(),
             similarity_threshold: default_similarity_threshold(),
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            database: DatabaseConfig::default(),
-            llm: LlmConfig::default(),
-            scanner: ScannerConfig::default(),
-            preview: PreviewConfig::default(),
-            trash: TrashConfig::default(),
-            duplicate_trash: DuplicateTrashConfig::default(),
-            thumbnails: ThumbnailConfig::default(),
-            schedule: ScheduleConfig::default(),
-            library: LibraryConfig::default(),
-            keybindings: KeyBindings::default(),
-            view: ViewConfig::default(),
-            pipeline: PipelineConfig::default(),
-            logging: LoggingConfig::default(),
         }
     }
 }

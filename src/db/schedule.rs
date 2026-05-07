@@ -19,6 +19,7 @@ impl ScheduledTaskType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "Scan" => Some(ScheduledTaskType::Scan),
@@ -58,6 +59,7 @@ impl ScheduleStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(ScheduleStatus::Pending),
